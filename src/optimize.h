@@ -689,6 +689,8 @@ struct Inliner {
         // Otherwise every use of the copy lives in the copied tree.
         nv->captured = keepcaptured && v->captured;
         vmap[v] = nv;
+        nv->componentowner = Remap(v->componentowner);
+        for (auto &c : nv->components) c = Remap(c);
         auto fit = o.facts.find(v);
         if (fit != o.facts.end()) o.facts[nv] = fit->second;
         return nv;

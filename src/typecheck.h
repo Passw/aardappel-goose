@@ -494,6 +494,18 @@ struct TypeCheck {
                              bool forwarding = false);
     void CheckCalleeRelative(Call *call, FnSpec *spec, vector<Val> &args);
     bool ResultLayoutFits(TypeExpr *from, TypeExpr *to);
+    // Root owners construct only as a declaration's immediate initializer.
+    // A destination alone is insufficient: a block/call can inherit it.
+    Node *rootinit = nullptr;
+    VarDef *rootowner = nullptr;
+    struct RootInitScope {
+        TypeCheck &tc;
+        Node *init;
+        VarDef *owner;
+        RootInitScope(TypeCheck &t, Node *n, VarDef *v)
+            : tc(t), init(t.rootinit), owner(t.rootowner) { t.rootinit = n; t.rootowner = v; }
+        ~RootInitScope() { tc.rootinit = init; tc.rootowner = owner; }
+    };
     // Whether the value being checked lands in a typed slot -- a field, an
     // element, an annotated variable, an assignment target -- whose declared
     // constness a read-only reference or slice must match (§9.5). A call
@@ -1375,6 +1387,7 @@ struct TypeCheck {
     Prov GlobalVarRead(VarDef *vd);
     Prov RefProvOf(VarDef *vd);
     VarDef *ResetLocal(VarDef *previous);
+    VarDef *RootComponent(VarDef *owner, TypeExpr *t, int field);
     VarDef *NewVar(string_view name, TypeExpr *type, Line l, bool isvar,
                    VarDef *previous = nullptr);
     VarDef *LookupVar(string_view name, string_view ns, Node *use = nullptr);
@@ -1900,6 +1913,8 @@ struct TypeCheck {
     bool ImplicitCopy(const Val &v, Node *n, TypeExpr *dt);
     [[noreturn]] void ImplicitCopyError(Node *n);
     void RequireCopyable(const Val &v, Node *n, TypeExpr *dt) {
+        if (ClassOf(dt) == SC_ROOT && (v.lvalue || IsPlainRef(v.type)))
+            Error(n, "root owners cannot be copied; bind a reference instead");
         if (ImplicitCopy(v, n, dt)) ImplicitCopyError(n);
     }
     void CheckBranchCopy(const Val &v, Node *n, TypeExpr *dt, Val &out);
@@ -2978,15 +2993,6 @@ struct TypeCheck {
             if (st->generics.empty()) GetStructInst(ast.StructOf(st, {}, st->line));
         for (auto en : ast.enums)
             if (en->generics.empty()) GetEnumInst(ast.EnumOf(en, {}, true, en->line));
-        // Root declarations now have their own classification and placement
-        // checks. Keep expression checking/codegen gated until independent
-        // component storage and provenance are implemented; unused generic
-        // declarations must not bypass this incremental-development guard.
-        for (auto st : ast.structs)
-            if (st->isroot)
-                Error(st->line, cat("root struct ", st->qname,
-                                   " is not supported yet: independent component storage "
-                                   "and lifetime checking are not implemented"));
         // And the sizes in every function's signature, for its parameters' and
         // type parameters' names, and in every generic type's fields.
         for (auto sf : ast.functions) SignatureNames(sf->params, sf->rets, sf->generics);

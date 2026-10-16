@@ -172,6 +172,8 @@ inline Val TypeCheck::CheckBuiltin(Call *c, const BuiltinDef &d, vector<Node *> 
             auto av = CheckV(args[0], nullptr);
             args[0]->exprtype = av.type;
             auto v = DecayRef(av);
+            if (ClassOf(v.type) == SC_ROOT)
+                Error(c, "root owners cannot be copied; bind a reference instead");
             if (v.type->kind == TY_SLICE)
                 Error(c, "copy takes a value or a reference, not a slice");
             if (!av.lvalue && !IsPlainRef(av.type))
@@ -759,6 +761,9 @@ inline TypeExpr *TypeCheck::OverloadedPart(Call *c, TypeExpr *t, vector<TypeExpr
 
 inline void TypeCheck::CheckRenderable(Call *c, const char *what, TypeExpr *t, Node *at,
                                        RenderSeen &seen, Val value, const Val &out) {
+    auto rendered = IsPlainRef(t) ? t->ref->sub : t;
+    if (ClassOf(rendered) == SC_ROOT)
+        Error(at, "root owner formatting is not implemented yet; format its fields separately");
     // A type met again on the path reaches itself through references. The
     // levels below render as this one does, from the struct, variant or ADT
     // a reference or slice leads to on by a function that runs no format

@@ -1,8 +1,20 @@
 # Root structs: library state with independent storage
 
-Status: frontend foundation implemented; storage and lifetime support pending.
-Parsing and source round-trips recognize the modifier. Semantic checking
-intentionally rejects root declarations until their owning layout is supported.
+Status: local owning storage implemented; full v1 support remains in progress.
+Parsing, declaration validation and independent local components work, including
+field references passed to ordinary functions, per-component shrink checks,
+serialization and stack restoration. Direct field accesses retain the existing
+stack-top caching and immutable array-reference aliases. Each component has a
+synthetic variable identity sharing its owner's lifetime; ordinary packed fields
+inside a component continue to share that component's region.
+
+The current checkpoint explicitly rejects root globals, whole-owner references,
+field projection through parameters/captures, and construction of root fields
+containing references. These are implementation guards, not additions to the v1
+language contract below. Root literals must be immediate declaration initializers;
+`State { .. }` supplies field defaults. Root padding is rejected because the owner
+has no packed layout; put padding in an ordinary component struct instead.
+
 The remaining document describes the target. Establish root structs first;
 evaluating a stdlib replacement for `reusable` and `reusable[]` is a separate
 milestone and is not a prerequisite for shipping root structs.

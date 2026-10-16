@@ -162,6 +162,8 @@ inline bool CodeGen::HoldsFatRef(TypeExpr *t) {
 }
 
 inline bool CodeGen::HoldsFatRefIn(TypeExpr *t, set<const void *> &open) {
+    // A root descriptor reaches the stacks owned by all its components.
+    if (IsRoot(t)) return true;
     switch (t->kind) {
         case TY_REF: return IsFatRef(t) || HoldsFatRefIn(t->ref->sub, open);
         case TY_SLICE: return HoldsFatRefIn(t->sub, open);
@@ -596,6 +598,13 @@ inline string CodeGen::CT(TypeExpr *t, bool unaligned) {
             auto si = SI(t);
             Append(d, "struct ", name, " {\n");
             if (EmptyLayout(si->st->fields)) Append(d, "    uint8_t gs_empty;\n");
+            else if (si->st->isroot) {
+                for (size_t i = 0; i < si->ftypes.size(); i++) {
+                    if (!si->ftypes[i]) continue;
+                    Append(d, "    ", CT(ast.RefTo(si->ftypes[i], t->line)), " ",
+                           Sanitize(si->st->fields[i].name), ";\n");
+                }
+            }
             else EmitCFields(d, si->st->fields, si->ftypes);
             Append(d, "};\n");
             break;

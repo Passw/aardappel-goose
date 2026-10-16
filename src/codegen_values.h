@@ -196,6 +196,7 @@ inline void CodeGen::PinLoc(Loc &lv) {
 inline CodeGen::Loc CodeGen::VarLoc(VarDef *vd) {
     Loc l;
     l.t = vd->type;
+    if (IsRoot(l.t)) l.rootowner = vd;
     if (auto ait = refalias.find(vd); ait != refalias.end()) {
         auto tg = const_cast<VarDef *>(ait->second);
         if (auto pit = aliaspath.find(vd); pit != aliaspath.end()) {
@@ -903,6 +904,16 @@ inline CodeGen::Loc CodeGen::FieldLocAt(Loc lv, int fieldidx) {
     if (lv.t->kind == TY_STRUCT) {
         auto si = SI(lv.t);
         auto ft = si->ftypes[fieldidx];
+        if (si->st->isroot) {
+            if (lv.rootowner) return VarLoc(lv.rootowner->components[fieldidx]);
+            assert(lv.val);
+            Loc r;
+            r.t = ast.RefTo(ft, lv.t->line);
+            r.val = true;
+            r.s = cat(lv.s, ".", Sanitize(si->st->fields[fieldidx].name));
+            DerefLoc(r);
+            return r;
+        }
         if (lv.val) {
             Loc r = lv;
             r.t = ft;

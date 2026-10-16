@@ -94,6 +94,8 @@ inline StructInst *TypeCheck::GetStructInst(TypeExpr *t) {
     typechain.push_back(t);
     BeginTypeBuild();
     for (auto i = 0; i < (int)st->fields.size(); i++) {
+        if (st->isroot && st->fields[i].ispad)
+            Error(st->line, "root structs have no packed byte layout; padding belongs inside a component");
         if (st->fields[i].ispad) continue;
         auto ft = inst->ftypes[i];
         ValidateType(ft, st->line, VT_FIELD);
@@ -421,6 +423,10 @@ inline bool TypeCheck::HoldsPlainRef(TypeExpr *t) {
 // so none of the three survives leaving the program. Self-relative
 // references do, which is the whole point.
 inline bool TypeCheck::ImageSafe(TypeExpr *t, string &why) {
+    if (ClassOf(t) == SC_ROOT) {
+        why = "a root owner has no contiguous byte image; serialize its fields separately";
+        return false;
+    }
     switch (t->kind) {
         case TY_SLICE:
             why = cat(TypeStr(t), " is a slice, which is an address");
@@ -702,6 +708,8 @@ inline void TypeCheck::ValidatePointee(TypeExpr *t, Line l) {
     // ones substitution makes later.
     if (t->ref->pool && t->ref->pool->type && !HasGenerics(t->ref->sub)) ValidatePool(t);
     ValidateType(t->ref->sub, l, VT_POINTEE);
+    if (t->ref->lenstorage >= 0 && ClassOf(t->ref->sub) == SC_ROOT)
+        Error(l, "root struct references must be plain references, not relative references");
 }
 
 // ------------------------------------------------------------------
@@ -1136,6 +1144,9 @@ inline bool TypeCheck::CanContainWalk(TypeExpr *t, TypeExpr *of) {
     auto loaded = LoadedTypeEq(t, of);
     assert(loaded == TypeEq(LoadType(t), of));
     if (loaded) return true;
+    // A root's component variables enumerate their own regions; the owner
+    // itself names only the control record, never all their storage at once.
+    if (t->kind == TY_STRUCT && t->struc->st->isroot) return false;
     if (t->kind == TY_ARRAY) return CanContain(t->arr->sub, of);
     return AnyField(t, [&](TypeExpr *ft) { return CanContain(ft, of); });
 }

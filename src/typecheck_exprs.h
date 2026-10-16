@@ -667,7 +667,24 @@ inline void TypeCheck::ResolveMemberLValue(LVal &lv, Dot *d) {
     };
     if (t->kind == TY_STRUCT) {
         auto inst = GetStructInst(t);
-        if (step(inst->st->fields, inst->ftypes, FieldsInFrame(d))) return;
+        if (inst->st->isroot) {
+            auto parent = lv.AsRoots();
+            if (step(inst->st->fields, inst->ftypes, true)) {
+                Roots components;
+                components.unknown = parent.unknown;
+                for (auto a : parent.alts) {
+                    if (!a.exact || !a.root || !a.root->type ||
+                        a.root->ownerspec != CurRealFrame().spec ||
+                        !TypeEq(ast.PlainOf(a.root->type), ast.PlainOf(t)))
+                        Error(d, "root field projection through a parameter, capture or unknown owner "
+                                 "is not implemented yet");
+                    a.root = RootComponent(a.root, t, d->fieldidx);
+                    components.Add(a);
+                }
+                lv.TakeAlts(components);
+                return;
+            }
+        } else if (step(inst->st->fields, inst->ftypes, FieldsInFrame(d))) return;
         if (inst->st->broken) throw Abandoned {};
         Error(d, cat("struct ", inst->st->name, " has no field ", d->name));
     }
@@ -753,6 +770,8 @@ inline bool TypeCheck::KeepsRef(const Val &v, TypeExpr *dt) {
 // through the reference, which is not so of an identity comparison's,
 // index_of's, or one bound to a `const T&`.
 inline Node *TypeCheck::AutoRef(Node *n, Val &v, bool writes) {
+    if (ClassOf(v.type) == SC_ROOT)
+        Error(n, "root owner references are not implemented yet; pass individual fields by reference");
     if (!Referenceable(n, v)) NoResizableRef(n);
     if (auto id = Is<Ident>(n); id && id->vdef && writes && v.writable)
         NoteWritableRef(id->vdef, n);
@@ -825,7 +844,9 @@ inline bool TypeCheck::FieldsInFrame(Dot *d) {
     if (!ot) return false;
     auto pointee = ot->kind == TY_REF;
     if (pointee) ot = ot->ref->sub;
-    if (ot->kind != TY_STRUCT || !GetStructInst(ot)->frameobj) return false;
+    if (ot->kind != TY_STRUCT) return false;
+    if (ot->struc->st->isroot) return true;
+    if (!GetStructInst(ot)->frameobj) return false;
     auto od = Is<Dot>(d->obj);
     return pointee || !od || FieldsInFrame(od);
 }
@@ -1446,6 +1467,8 @@ inline Val TypeCheck::VoidVal() {
 inline Val TypeCheck::CheckRefOf(Unary *x) {
     DestScope ds(*this, Dest {});
     auto lv = CheckLValue(x->child);
+    if (ClassOf(lv.type) == SC_ROOT)
+        Error(x, "root owner references are not implemented yet; pass individual fields by reference");
     if (lv.var) RequireAssigned(lv.var, x);
     // A resizable value has a header of its own only as a whole variable or
     // as a frame object's tail (C.2).
@@ -1857,6 +1880,8 @@ inline Val TypeCheck::CheckBinaryResult(Binary *b, Val &lv, Val &rv) {
         v.type = compare ? ast.booltype : IsOpaque(lt) ? lt : rt;
         return v;
     }
+    if (ClassOf(lt) == SC_ROOT || ClassOf(rt) == SC_ROOT)
+        Error(b, "root owners do not support value operators; operate on their fields instead");
     auto numeric = [](TypeExpr *t) { return IsIntT(t) || t->kind == TY_FLT; };
     if (b->op == T_EQ || b->op == T_NEQ) {
         Val v;
@@ -3067,6 +3092,9 @@ inline TypeCheck::LitDeep TypeCheck::CheckInits(StructLit *sl, vector<Field> &fi
     for (size_t k = 0; k < sl->inits.size(); k++) {
         auto &fi = sl->inits[k];
         auto ft = ftypes[sl->fieldindices[k]];
+        auto component = selft->kind == TY_STRUCT && selft->struc->st->isroot
+                             ? RootComponent(rootowner, selft, sl->fieldindices[k]) : nullptr;
+        DestScope ds(*this, component ? Dest(component) : curdst);
         if (Is<SelfRef>(fi.val)) CheckSelfInit(fi.val, ft, selft);
         else {
             SlotScope ss(*this, true);

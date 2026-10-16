@@ -267,7 +267,8 @@ struct CodeGen {
 
     bool IsFix(TypeExpr *t)  { return Cls(t) == SC_FIXED; }
     bool IsResz(TypeExpr *t) { return Cls(t) == SC_RESIZABLE; }
-    bool IsBytesT(TypeExpr *t) { return Cls(t) != SC_FIXED; }
+    bool IsRoot(TypeExpr *t) { return Cls(t) == SC_ROOT; }
+    bool IsBytesT(TypeExpr *t) { auto c = Cls(t); return c == SC_VARIABLE || c == SC_RESIZABLE; }
     // This is a C backend storage/ABI choice, not a language size class:
     // packed layout, copying, indexing and lifetime rules stay unchanged.
     static constexpr int64_t NATIVE_VALUE_LIMIT = 4096;
@@ -820,6 +821,7 @@ struct CodeGen {
         // object's tail (refalias): its pointee is that location.
         const VarDef *aliasof = nullptr;
         Node *aliaspath = nullptr;
+        VarDef *rootowner = nullptr; // Direct owner: project to its component's normal Loc.
     };
 
     bool PrefVar(const VarDef *vd);

@@ -27,9 +27,18 @@ inline bool CodeGen::IsPoolParam(FnSpec *sp, size_t i) {
 // stacks it carries, or "" where the expression does not say.
 inline string CodeGen::HandedStacks(Node *n) {
     auto c = n;
+    Dot *component = nullptr;
     if (auto un = Is<Unary>(n); un && un->op == T_BITAND) c = un->child;
-    auto id = Is<Ident>(FieldChainRoot(c, false));
+    while (auto d = Is<Dot>(c)) {
+        if (!d->IsField()) return "";
+        component = d;
+        c = d->obj;
+        // A reference field on the way leads to another stack.
+        if (!Is<Ident>(c) && c->exprtype && c->exprtype->kind == TY_REF) return "";
+    }
+    auto id = Is<Ident>(c);
     auto v = id ? id->vdef : nullptr;
+    if (v && component && IsRoot(v->type)) v = v->components[component->fieldidx];
     while (v && refalias.count(v)) v = const_cast<VarDef *>(refalias[v]);
     if (!v || !v->type || (!IsResz(v->type) && (!IsFatRef(v->type) || v->isvar)))
         return "";
@@ -879,6 +888,9 @@ inline string CodeGen::LocalName(VarDef *vd) {
     assert(!vd->isglobal);
     auto it = vnames.find(vd);
     if (it != vnames.end()) return it->second;
+    if (vd->componentowner)
+        return vnames[vd] = Unique2(cat("gs_component_", Sanitize(vd->componentowner->name),
+                                       "_", vd->componentfield));
     return vnames[vd] = Unique2(Sanitize(vd->name));
 }
 

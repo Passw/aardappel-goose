@@ -42,6 +42,7 @@ inline bool TypeCheck::ContainsGrowShrink(TypeExpr *t) {
     switch (t->kind) {
         case TY_ARRAY: return t->arr->akind == A_GROWSHRINK;
         case TY_STRUCT: case TY_VARIANT:
+            if (ClassOf(t) == SC_ROOT) return false; // Components own their arrays separately.
             return AnyField(t, [&](TypeExpr *ft) { return ContainsGrowShrink(ft); });
         default: return false;
     }
@@ -576,7 +577,10 @@ inline VarDef *TypeCheck::ResetLocal(VarDef *previous) {
     auto slotref = previous->slotref;
     auto constuse = previous->constuse;
     auto constwhat = previous->constwhat;
+    auto components = std::move(previous->components);
+    for (auto c : components) if (c) ResetLocal(c);
     *previous = VarDef {};
+    previous->components = std::move(components);
     previous->captured = captured;
     previous->nonneguse = nonneguse;
     previous->markuse = markuse;
@@ -585,6 +589,25 @@ inline VarDef *TypeCheck::ResetLocal(VarDef *previous) {
     previous->constuse = constuse;
     previous->constwhat = constwhat;
     return previous;
+}
+
+inline VarDef *TypeCheck::RootComponent(VarDef *owner, TypeExpr *t, int field) {
+    auto si = GetStructInst(t);
+    assert(si->st->isroot && owner);
+    owner->components.resize(si->ftypes.size(), nullptr);
+    auto &c = owner->components[field];
+    if (!c) c = ast.NewVarDef();
+    c->componentowner = owner;
+    c->componentfield = field;
+    c->type = si->ftypes[field];
+    c->name = ast.Intern(cat(owner->name, ".", si->st->fields[field].name));
+    c->line = owner->line;
+    c->depth = owner->depth;
+    c->ownerspec = owner->ownerspec;
+    c->isglobal = owner->isglobal;
+    c->isvar = owner->isvar;
+    c->assigned = c->maybeassigned = true;
+    return c;
 }
 
 inline VarDef *TypeCheck::NewVar(string_view name, TypeExpr *type, Line l, bool isvar,
@@ -1170,6 +1193,8 @@ inline void TypeCheck::CheckBranchRoot(const Val &v, int depth, Node *at, const 
 // either (Val::slot). A reference parameter binds the storage a construct's
 // branches name instead (CheckBranchCopy), never the construct itself.
 inline Val TypeCheck::TempCopy(Val v) {
+    if (v.type && ClassOf(v.type) == SC_ROOT)
+        Error(v.type->line, "root owners cannot be copied into a temporary");
     if (!v.type || v.isnull || v.type->kind == TY_REF || v.type->kind == TY_VOID ||
         v.type->kind == TY_FN)
         return v;
@@ -2416,6 +2441,7 @@ inline void TypeCheck::CheckVarDecl(VarDecl *vd, bool global) {
         if (!global) {
             CheckCycleInit(d, fi, calls);
             vars.push_back(d);
+            for (auto c : d->components) if (c) vars.push_back(c);
         }
     };
     // A var global declared without an initializer starts as its type's
@@ -2489,6 +2515,7 @@ inline void TypeCheck::CheckVarDecl(VarDecl *vd, bool global) {
             // or slice variable binds a value rather than storing one. An
             // annotated variable is a typed slot for constness (§9.5).
             DestScope ds(*this, Dest(d, ann && (ann->kind == TY_REF || ann->kind == TY_SLICE)));
+            RootInitScope ris(*this, vd->inits[i], d);
             SlotScope ss(*this, ann != nullptr);
             auto refinit = Is<Unary>(vd->inits[i]);
             if (refinit && refinit->synth) {
@@ -2617,6 +2644,7 @@ inline void TypeCheck::CheckCycleInit(VarDef *d, int fi, int calls) {
 // §4.4: which lvalues accept `=` after construction.
 inline void TypeCheck::AssignableClassCheck(TypeExpr *t, Node *at) {
     auto cls = ClassOf(t);
+    if (cls == SC_ROOT) Error(at, "a root owner cannot be assigned as a whole; assign its fields instead");
     if (cls == SC_VARIABLE && !(t->kind == TY_ARRAY && t->arr->akind == A_LIMITED))
         Error(at, cat("a value of type ", TypeStr(t),
                       " is frozen at construction (§4.4); rebuild its container instead"));

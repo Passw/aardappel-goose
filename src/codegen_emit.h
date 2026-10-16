@@ -92,11 +92,20 @@ inline const VarDef *CodeGen::AliasTarget(VarDef *d, Node *init, Node *&path) {
         }
         // A frame object's tail, by fields from a variable that holds the
         // object or from a reference that stands for one: a C member of a
-        // header that never moves, on the object's own stack.
-        auto n = FieldChainRoot(u->child, true);
+        // header that never moves, on the object's own stack. A reference
+        // field on the way can be rebound, and leads elsewhere anyway.
+        auto n = u->child;
+        Dot *component = nullptr;
+        while (auto dot = Is<Dot>(n)) {
+            if (!dot->IsField() || !dot->obj->exprtype) return nullptr;
+            component = dot;
+            n = dot->obj;
+            if (!Is<Ident>(n) && n->exprtype->kind == TY_REF) return nullptr;
+        }
         auto id = Is<Ident>(n);
         if (n == u->child || !id || !id->vdef || !id->vdef->type) return nullptr;
         auto t = id->vdef;
+        if (component && IsRoot(t->type)) t = t->components[component->fieldidx];
         if (IsResz(t->type) ? t->reusable : !fixedref(t)) return nullptr;
         path = u->child;
         return t;

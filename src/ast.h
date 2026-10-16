@@ -1512,6 +1512,7 @@ struct SStruct {
     Line line;
     Line end;                   // As SFunction::end.
     string_view doc;            // As SFunction::doc.
+    bool isroot = false;       // Explicit owning layout (docs/design/root_structs.md).
     vector<GenericParam> generics;
     vector<Field> fields;
     vector<StructInst *> insts;  // Instantiations (typecheck), owned by Ast.

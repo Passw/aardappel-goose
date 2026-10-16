@@ -444,6 +444,11 @@ struct Parser {
             default: break;
         }
         declseen = true;
+        // Contextual: a variable, field or function named root remains a name.
+        if (lex.tok == T_IDENT && lex.attr == "root" && lex.PeekTok() == T_STRUCT) {
+            ParseStructDecl(true);
+            return;
+        }
         if (AtInline() || AtCheckfree()) goto fndecl;
         switch (lex.tok) {
             case T_STRUCT: ParseStructDecl(); return;
@@ -542,14 +547,16 @@ struct Parser {
         }
     }
 
-    void ParseStructDecl() {
+    void ParseStructDecl(bool isroot = false) {
         auto firsttype = ast.alltypes.size();
         auto line = CurLine();
         auto doc = lex.doc;
         auto depth = lex.DepthBefore();
         auto startp = lex.attr.data();
-        lex.Next();
+        if (isroot) lex.Next();
+        Expect(T_STRUCT, "struct declaration");
         auto st = new SStruct();
+        st->isroot = isroot;
         ast.structs.push_back(st);
         st->name = ParseDeclName("struct declaration");
         st->ns = curns;

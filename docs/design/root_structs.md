@@ -1,7 +1,9 @@
 # Root structs: library state with independent storage
 
-Status: accepted direction, implementation planned. This document describes the
-target, not an implemented language feature. Establish root structs first;
+Status: frontend foundation implemented; storage and lifetime support pending.
+Parsing and source round-trips recognize the modifier. Semantic checking
+intentionally rejects root declarations until their owning layout is supported.
+The remaining document describes the target. Establish root structs first;
 evaluating a stdlib replacement for `reusable` and `reusable[]` is a separate
 milestone and is not a prerequisite for shipping root structs.
 

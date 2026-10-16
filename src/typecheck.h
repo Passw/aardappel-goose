@@ -2972,6 +2972,14 @@ struct TypeCheck {
         }
         ResolvePools();
         ResolveIndexTypes();
+        // Frontend foundation only: until component storage and provenance are
+        // implemented, no root declaration may enter ordinary struct checking,
+        // including unused generic declarations whose instantiation is deferred.
+        for (auto st : ast.structs)
+            if (st->isroot)
+                Error(st->line, cat("root struct ", st->qname,
+                                   " is not supported yet: independent component storage "
+                                   "and lifetime checking are not implemented"));
         // Validate all non-generic type declarations up front: clearer errors
         // than at first use, and unused decls get checked too.
         for (auto st : ast.structs)

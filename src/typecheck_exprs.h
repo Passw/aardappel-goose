@@ -674,7 +674,7 @@ inline void TypeCheck::ResolveMemberLValue(LVal &lv, Dot *d) {
                 components.unknown = parent.unknown;
                 for (auto a : parent.alts) {
                     if (!a.exact || !a.root || !a.root->type ||
-                        a.root->ownerspec != CurRealFrame().spec ||
+                        (!a.root->isglobal && a.root->ownerspec != CurRealFrame().spec) ||
                         !TypeEq(ast.PlainOf(a.root->type), ast.PlainOf(t)))
                         Error(d, "root field projection through a parameter, capture or unknown owner "
                                  "is not implemented yet");

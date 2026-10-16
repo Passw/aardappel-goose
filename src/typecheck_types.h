@@ -1319,6 +1319,7 @@ inline Roots TypeCheck::RootCandidates(TypeExpr *of, int d, bool globalsonly, bo
     for (auto g : ast.globals)
         for (auto gd : g->defs) {
             consider(gd, 0);
+            for (auto c : gd->components) if (c) consider(c, 0);
             unchecked = unchecked || (!gd->type && !(g->type && IsRefOrSlice(g->type)));
         }
     // A writable reference or slice is never given static data but a null or an

@@ -3322,6 +3322,10 @@ struct TypeCheck {
                 if (!n) return;
                 if (auto id = Is<Ident>(n)) {
                     auto g = id->vdef;
+                    if (g && g->isglobal && g->type && ClassOf(g->type) == SC_ROOT)
+                        Error(n, cat("thread programs cannot copy root global ", id->name,
+                                     " (reached from thread_fn ", entry->sf->name,
+                                     "); construct worker-local state instead"));
                     if (g && g->isglobal && g->type && !IsFlat(g->type) && !StaticViewsOnly(g))
                         Error(n, cat("thread programs may access only flat globals, and `let` "
                                      "globals whose references lead only to static data "

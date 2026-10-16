@@ -273,7 +273,10 @@ struct CodeGen {
     // packed layout, copying, indexing and lifetime rules stay unchanged.
     static constexpr int64_t NATIVE_VALUE_LIMIT = 4096;
     bool IsLargeFixed(TypeExpr *t) { return IsFix(t) && FixedSize(t) > NATIVE_VALUE_LIMIT; }
-    bool NeedsStack(TypeExpr *t) { return IsBytesT(t) || IsLargeFixed(t); }
+    bool NeedsStack(TypeExpr *t) {
+        return IsBytesT(t) || IsLargeFixed(t) ||
+               (IsRoot(t) && AnyField(t, [&](TypeExpr *ft) { return NeedsStack(ft); }));
+    }
     // Declare a value, replacing name with its C lvalue when stored on a
     // data stack. A binding survives its block; a temporary its statement.
     void FixedLocal(TypeExpr *t, string &name, const string &init = "", bool forlocal = false);
@@ -1429,6 +1432,7 @@ struct CodeGen {
 
     bool StaticInitX(Node *n, TypeExpr *t, string &out);
     void EmitGlobalDecls();
+    void InitGlobalValue(VarDef *d, Node *init);
     void EmitGlobalInit();
     string GlobalLenLv(VarDef *d);
     void InitGlobalStack(VarDef *d);

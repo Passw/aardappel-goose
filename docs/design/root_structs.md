@@ -1,14 +1,20 @@
 # Root structs: library state with independent storage
 
-Status: local owning storage implemented; full v1 support remains in progress.
-Parsing, declaration validation and independent local components work, including
-field references passed to ordinary functions, per-component shrink checks,
+Status: direct owning storage implemented; full v1 support remains in progress.
+Parsing, declaration validation and independent local/global components work,
+including field references passed to ordinary functions, per-component shrink checks,
 serialization and stack restoration. Direct field accesses retain the existing
 stack-top caching and immutable array-reference aliases. Each component has a
 synthetic variable identity sharing its owner's lifetime; ordinary packed fields
 inside a component continue to share that component's region.
+The backend currently materializes a private descriptor pointing at component
+storage; direct projections resolve to the underlying local/global locations.
+The function ABI for borrowing an entire owner is still pending.
 
-The current checkpoint explicitly rejects root globals, whole-owner references,
+Workers may construct local roots, but cannot reach a root global through direct
+access or calls. Unused root globals do not prevent worker compilation.
+
+The current checkpoint explicitly rejects whole-owner references,
 field projection through parameters/captures, and construction of root fields
 containing references. These are implementation guards, not additions to the v1
 language contract below. Root literals must be immediate declaration initializers;

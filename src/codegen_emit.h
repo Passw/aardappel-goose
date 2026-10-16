@@ -311,6 +311,9 @@ inline bool CodeGen::RefTopsOk(FnSpec *sp, bool farreturn) {
         if (!v || !v->type) return;
         if (IsFatRef(v->type) && !fatparams.count(v) && !refalias.count(v)) ok = false;
         if (v->isglobal && IsBytesT(v->type) && maybeparam(v->type)) ok = false;
+        if (v->isglobal && IsRoot(v->type))
+            for (auto c : v->components)
+                if (c && IsBytesT(c->type) && maybeparam(c->type)) ok = false;
     };
     function<void(Node *)> walk = [&](Node *n) {
         if (!n || !ok) return;
@@ -760,7 +763,24 @@ inline void CodeGen::EmitGlobalDecls() {
             // dedicated stack where it has one.
             auto member = [&](const string &decl) { Append(gblock, "    ", decl, ";\n"); };
             gnames[d] = cat("GS_GL->", name);
-            if (IsResz(d->type)) {
+            if (IsRoot(d->type)) {
+                member(cat(CT(d->type), " ", name));
+                for (auto c : d->components) {
+                    if (!c) continue;
+                    auto cn = Unique(cat("gs_component_", name, "_", c->componentfield));
+                    gnames[c] = cat("GS_GL->", cn);
+                    auto ct = c->type;
+                    member(cat(IsResz(ct) && !IsFrameObj(ct) ? string("gs_rhdr")
+                               : IsBytesT(ct) && !IsFrameObj(ct) ? string("uint8_t *")
+                               : CT(ct), " ", cn));
+                    if (IsBytesT(ct)) {
+                        auto stk = Unique(cat("gs_gstk_", cn));
+                        member(cat("gs_stack ", stk));
+                        gstks[c] = cat("(&GS_GL->", stk, ")");
+                        reg(gstks[c]);
+                    }
+                }
+            } else if (IsResz(d->type)) {
                 EmitCoreTypes();
                 auto stk = Unique(cat("gs_gstk_", name));
                 member(cat(RzCT(d->type), " ", name));
@@ -803,6 +823,36 @@ inline void CodeGen::EmitGlobalDecls() {
     }
 }
 
+inline void CodeGen::InitGlobalValue(VarDef *d, Node *init) {
+    if (IsRoot(d->type)) {
+        auto sl = Is<StructLit>(init);
+        assert(sl && sl->sinst->st->isroot);
+        for (auto c : d->components) {
+            if (!c) continue;
+            auto i = c->componentfield;
+            InitGlobalValue(c, sl->InitFor(i));
+            Ident id(c->line, c->name);
+            id.vdef = c;
+            id.exprtype = c->type;
+            auto ref = GenRefVal(&id, init->line);
+            L(gnames[d], ".", Sanitize(sl->sinst->st->fields[i].name), " = ", ref, ";");
+        }
+    } else if (IsResz(d->type)) {
+        InitGlobalStack(d);
+        GenConstruct(init, gstks[d], d->type, GlobalLenLv(d));
+    } else if (IsBytesT(d->type)) {
+        InitGlobalStack(d);
+        GenConstruct(init, gstks[d], d->type);
+    } else if (PrefVar(d)) {
+        L(gnames[d], " = ", GenPrefVal(init), ";");
+    } else if (IsRelRef(d->type)) {
+        EmitRelStoreAt(cat("(uint8_t *)&", gnames[d]), d->type, GenX(init),
+                       init->line, true, RelValue(init));
+    } else {
+        GenAny(init, Dst { DK_LVALUE, gnames[d], d->type });
+    }
+}
+
 inline void CodeGen::EmitGlobalInit() {
     curspec = nullptr;
     curinfo = nullptr;
@@ -815,20 +865,7 @@ inline void CodeGen::EmitGlobalInit() {
         for (size_t i = 0; i < g->defs.size(); i++) {
             auto d = g->defs[i];
             if (gstatic.count(d)) continue;   // Initialized at its declaration.
-            if (IsResz(d->type)) {
-                InitGlobalStack(d);
-                GenConstruct(g->inits[i], gstks[d], d->type, GlobalLenLv(d));
-            } else if (IsBytesT(d->type)) {
-                InitGlobalStack(d);
-                GenConstruct(g->inits[i], gstks[d], d->type);
-            } else if (PrefVar(d)) {
-                L(gnames[d], " = ", GenPrefVal(g->inits[i]), ";");
-            } else if (IsRelRef(d->type)) {
-                EmitRelStoreAt(cat("(uint8_t *)&", gnames[d]), d->type, GenX(g->inits[i]),
-                               g->inits[i]->line, true, RelValue(g->inits[i]));
-            } else {
-                GenAny(g->inits[i], Dst { DK_LVALUE, gnames[d], d->type });
-            }
+            InitGlobalValue(d, g->inits[i]);
         }
         if (termjump) cscopes.back().saves.clear();
         PopSc();

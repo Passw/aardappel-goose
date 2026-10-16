@@ -2061,12 +2061,18 @@ inline void TypeCheck::CheckGlobalShrinks() {
     for (auto &gs : globalshrinks) CheckItem([&] {
         vector<VarDef *> arrays;
         if (!gs.bound) arrays.push_back(gs.arr);
-        else
+        else {
+            auto consider = [&](VarDef *gd) {
+                if (gd && gd->type && !IsRefOrSlice(gd->type) &&
+                    CanContain(LoadType(gd->type), gs.bound))
+                    arrays.push_back(gd);
+            };
             for (auto g : ast.globals)
-                for (auto gd : g->defs)
-                    if (gd->type && !IsRefOrSlice(gd->type) &&
-                        CanContain(LoadType(gd->type), gs.bound))
-                        arrays.push_back(gd);
+                for (auto gd : g->defs) {
+                    consider(gd);
+                    for (auto c : gd->components) consider(c);
+                }
+        }
         for (auto arr : arrays) {
             auto arrtype = gs.bound ? gs.bound : LoadType(arr->type);
             for (auto g : ast.globals) {
@@ -3882,6 +3888,8 @@ inline bool TypeCheck::NamedOutside(FnSpec *spec, vector<VarDef *> &out) {
     set<VarDef *> seen;
     auto add = [&](VarDef *v) {
         if (seen.insert(v).second) out.push_back(v);
+        for (auto c : v->components)
+            if (c && seen.insert(c).second) out.push_back(c);
     };
     // A variable of an activation the call runs is created by it.
     for (auto v : named)

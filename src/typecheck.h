@@ -2972,20 +2972,21 @@ struct TypeCheck {
         }
         ResolvePools();
         ResolveIndexTypes();
-        // Frontend foundation only: until component storage and provenance are
-        // implemented, no root declaration may enter ordinary struct checking,
-        // including unused generic declarations whose instantiation is deferred.
-        for (auto st : ast.structs)
-            if (st->isroot)
-                Error(st->line, cat("root struct ", st->qname,
-                                   " is not supported yet: independent component storage "
-                                   "and lifetime checking are not implemented"));
         // Validate all non-generic type declarations up front: clearer errors
         // than at first use, and unused decls get checked too.
         for (auto st : ast.structs)
             if (st->generics.empty()) GetStructInst(ast.StructOf(st, {}, st->line));
         for (auto en : ast.enums)
             if (en->generics.empty()) GetEnumInst(ast.EnumOf(en, {}, true, en->line));
+        // Root declarations now have their own classification and placement
+        // checks. Keep expression checking/codegen gated until independent
+        // component storage and provenance are implemented; unused generic
+        // declarations must not bypass this incremental-development guard.
+        for (auto st : ast.structs)
+            if (st->isroot)
+                Error(st->line, cat("root struct ", st->qname,
+                                   " is not supported yet: independent component storage "
+                                   "and lifetime checking are not implemented"));
         // And the sizes in every function's signature, for its parameters' and
         // type parameters' names, and in every generic type's fields.
         for (auto sf : ast.functions) SignatureNames(sf->params, sf->rets, sf->generics);

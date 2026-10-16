@@ -72,6 +72,11 @@ inline StructInst *TypeCheck::GetStructInst(TypeExpr *t) {
     LimitNestedInsts(t);
     auto inst = ast.NewStructInst();
     inst->st = st;
+    if (st->isroot) {
+        inst->sclass = SC_ROOT;
+        // There is no single byte image, even if every component is flat.
+        inst->flat = false;
+    }
     inst->args = t->struc->args;
     inst->run = { &st->fields, &inst->ftypes };
     st->insts.push_back(inst);
@@ -82,8 +87,9 @@ inline StructInst *TypeCheck::GetStructInst(TypeExpr *t) {
         for (auto &f : st->fields)
             inst->ftypes.push_back(f.ispad ? nullptr : Subst(f.type));
     });
-    // Placement (§3.4): a resizable field only as the tail, making the
-    // struct itself resizable; any variable part makes it variable.
+    // Ordinary structs have one packed region and at most one resizable
+    // tail. Root fields have independent storage, so neither their order
+    // nor their size classes change the owner's SC_ROOT classification.
     auto lastreal = LastRealField(st->fields);
     typechain.push_back(t);
     BeginTypeBuild();
@@ -95,7 +101,7 @@ inline StructInst *TypeCheck::GetStructInst(TypeExpr *t) {
             Error(st->line, cat("field ", st->fields[i].name, " of struct ", st->name,
                                 " cannot be ", zs, ": ", TypeStr(ft), " (§3.4)"));
         auto c = ClassOf(ft);
-        if (c == SC_RESIZABLE) {
+        if (c == SC_RESIZABLE && !st->isroot) {
             // A pad after the tail too: its bytes would lie where the tail
             // grows.
             if (i + 1 < (int)st->fields.size())
@@ -606,7 +612,19 @@ inline void TypeCheck::ValidateType(TypeExpr *t, Line l, int pos) {
             Error(l, "expression has no value here");
         case TY_FN:
             Error(l, "function value types are compile-time only and cannot be stored");
-        case TY_STRUCT: GetStructInst(t); return;
+        case TY_STRUCT:
+            // Check placement before instantiation: nested root ownership is
+            // unsupported even if the nested type is empty, fixed-only,
+            // generic, or the enclosing declaration is itself a root.
+            if (t->struc->st->isroot && pos != VT_LOCAL && pos != VT_GLOBAL &&
+                pos != VT_POINTEE)
+                Error(l, cat("root struct ", TypeStr(t),
+                             " can only be owned by a local or global variable; ",
+                             pos == VT_PARAM ? "pass it by reference instead"
+                             : pos == VT_RET ? "return a reference instead"
+                             : "nested root owners are not supported"));
+            GetStructInst(t);
+            return;
         case TY_ENUM: {
             auto inst = GetEnumInst(t);
             if (!inst->validated && !t->enu->varmode)

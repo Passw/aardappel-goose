@@ -1629,7 +1629,10 @@ NODE_END
 // because later phases (optimization/codegen) consume it alongside the AST.
 
 // Size classes (§1.1): the max over a compound's parts, subject to placement.
-enum SizeClass { SC_FIXED, SC_VARIABLE, SC_RESIZABLE };
+// A root owner is not a packed value of any size. Its control record can
+// have a fixed native size while its components occupy independent stacks.
+// Keep that distinction even for roots with no resizable fields.
+enum SizeClass { SC_FIXED, SC_VARIABLE, SC_RESIZABLE, SC_ROOT };
 
 // One checked variable: a global, local, parameter, or binding (for/match/
 // function value). Created per specialization, so generic code has concrete

@@ -206,6 +206,10 @@ inline CodeGen::Loc CodeGen::VarLoc(VarDef *vd) {
             l.aliaspath = pit->second;
         } else if (tg->type->kind == TY_REF) {
             l = VarLoc(tg);
+        } else if (IsRoot(tg->type)) {
+            l.val = true;
+            l.s = cat("(&", VarLoc(tg).s, ")");
+            l.aliasof = tg;
         } else {
             // The reference value is made where one is needed; its pointee
             // is the variable's own location (DerefLoc).

@@ -820,8 +820,8 @@ struct CodeGen {
         // set on the reference by VarLoc, and, for the length, carried across
         // the deref to the pointee, where ArrayView reads it instead of memory.
         string hbase, hlen;
-        // A reference variable standing for a resizable variable or a frame
-        // object's tail (refalias): its pointee is that location.
+        // A reference variable standing for a resizable/root variable or a
+        // frame object's tail (refalias): its pointee is that location.
         const VarDef *aliasof = nullptr;
         Node *aliaspath = nullptr;
         VarDef *rootowner = nullptr; // Direct owner: project to its component's normal Loc.
@@ -829,8 +829,8 @@ struct CodeGen {
 
     bool PrefVar(const VarDef *vd);
 
-    // A fat reference variable that cannot be rebound, bound to a resizable
-    // variable or to another such reference -- an inlined callee's `A&`
+    // A fat or root reference variable that cannot be rebound, bound to a
+    // resizable/root variable or another such reference -- an inlined callee's `A&`
     // parameter, a base-case inlining's copy of a reference argument, a
     // function value's reference parameter -- names exactly what its
     // initializer names for its whole life. It is emitted as no C variable

@@ -59,24 +59,27 @@ inline const VarDef *CodeGen::OpenIbNrvo(InlineBlock *ib, const Dst &d) {
     return vd;
 }
 
-// What `d`, bound to `init`, stands for (refalias): the resizable variable
+// What `d`, bound to `init`, stands for (refalias): the resizable or root variable
 // `&v` names, or the reference variable an identifier names, followed
 // through that one's own alias. Null where d has to be a C variable: it can
 // be rebound, a nested function captures it (and is handed its address),
 // it is pool-shaped, or the initializer is anything but such a name. A
 // parameter, an alias, and a captured reference that cannot be rebound hold
 // the same value as long as d is live; a resizable variable's header and
-// stack never move.
+// stack never move, nor do a root owner's descriptor slots.
 inline const VarDef *CodeGen::AliasTarget(VarDef *d, Node *init, Node *&path) {
     path = nullptr;
+    auto cache_ref = [&](TypeExpr *t) {
+        return IsFatRef(t) || (t->kind == TY_REF && IsRoot(t->ref->sub));
+    };
     if (!d || !init || !curspec || d->isvar || d->isglobal || d->reusable || !d->type ||
-        !IsFatRef(d->type) || d->type->ref->optional || PrefVar(d) || d->captured ||
+        !cache_ref(d->type) || d->type->ref->optional || PrefVar(d) || d->captured ||
         capturedvars.count(d))
         return nullptr;
     // A reference variable that stands for its whole life for what it holds:
     // a parameter, an alias, a captured reference, none of them rebindable.
     auto fixedref = [&](const VarDef *t) -> const VarDef * {
-        if (!t || !t->type || !IsFatRef(t->type)) return nullptr;
+        if (!t || !t->type || !cache_ref(t->type)) return nullptr;
         if (refalias.count(t)) return t;
         if (t->isvar || t->isglobal || t->reusable || PrefVar(t)) return nullptr;
         for (auto p : curspec->params) if (p == t) return t;
@@ -87,7 +90,8 @@ inline const VarDef *CodeGen::AliasTarget(VarDef *d, Node *init, Node *&path) {
         if (!u->child->exprtype || !TEq(d->type->ref->sub, u->child->exprtype)) return nullptr;
         if (auto id = Is<Ident>(u->child)) {
             auto t = id->vdef;
-            if (!t || !t->type || t->reusable || !IsResz(t->type)) return nullptr;
+            if (!t || !t->type || t->reusable || (!IsResz(t->type) && !IsRoot(t->type)))
+                return nullptr;
             return t;
         }
         // A frame object's tail, by fields from a variable that holds the
@@ -114,7 +118,8 @@ inline const VarDef *CodeGen::AliasTarget(VarDef *d, Node *init, Node *&path) {
     auto t = id ? id->vdef : nullptr;
     if (!t || !t->type || !init->exprtype || !TEq(init->exprtype, d->type)) return nullptr;
     // A receiver the checker takes the reference of in place.
-    if (IsResz(t->type) && !t->reusable && TEq(d->type->ref->sub, t->type)) return t;
+    if ((IsResz(t->type) || IsRoot(t->type)) && !t->reusable && TEq(d->type->ref->sub, t->type))
+        return t;
     if (!TEq(t->type, d->type)) return nullptr;
     if (auto it = refalias.find(t); it != refalias.end()) {
         if (auto pit = aliaspath.find(t); pit != aliaspath.end()) path = pit->second;

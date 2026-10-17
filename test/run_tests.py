@@ -1776,6 +1776,30 @@ def main():
         else:
             r.ok("root owner caches")
     r.show_task(root_owner_caches)
+    # Inlined helpers and chains of immutable root aliases keep one spelling
+    # of each component. This caller remains out of line (multiple results).
+    def root_alias_caches():
+        cfile = gendir / "root_alias_caches-shapes.c"
+        code, out, err = r.goose("-O2", "-o", cfile, HERE / "codegen" / "root_alias_caches.goose")
+        if code != 0:
+            r.fail("root alias caches", out + err)
+            return
+        text = cfile.read_text()
+        match = re.search(r"^static [^\n;]*\bgrow_g\w*\([^\n]*\) \{\n(.*?)^\}\n",
+                          text, re.MULTILINE | re.DOTALL)
+        body = match[1] if match else ""
+        prefix, _, loop = body.partition("for (")
+        cached = all(re.search(rf"uint8_t \*\w+ = .*\.{f}_g\.stk->top;", prefix)
+                     and re.search(rf"int64_t \w+ = .*\.{f}_g\.hdr->len;", prefix)
+                     for f in ("first", "second"))
+        # No aliases or metadata traffic in the inlined loop; bounds/runtime
+        # checks elsewhere are unaffected by this representation change.
+        loop = loop.partition("\n    }")[0]
+        if not cached or "hdr->" in loop or "stk->" in loop or "State_g *" in loop:
+            r.fail("root alias caches", body)
+        else:
+            r.ok("root alias caches")
+    r.show_task(root_alias_caches)
     # Fields nothing can move are member stores, not stores through a
     # pointer taken first (StableDest).
     def member_stores():

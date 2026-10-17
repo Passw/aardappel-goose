@@ -1,6 +1,6 @@
 # Root structs: library state with independent storage
 
-Status: direct owning storage implemented; full v1 support remains in progress.
+Status: root structs v1 implemented. Reusable-pool migration remains separate.
 Parsing, declaration validation and independent local/global components work,
 including field references passed to ordinary functions, per-component shrink checks,
 serialization and stack restoration. Direct field accesses retain the existing
@@ -20,16 +20,17 @@ handles root fields.
 Workers may construct local roots, but cannot reach a root global through direct
 access or calls. Unused root globals do not prevent worker compilation.
 
-Reference-containing fields now retain per-component store records, including
-writes through calls. Default formatting and custom format hooks inspect owners
-by reference. Remaining work covers the acceptance and performance audit below.
+Reference-containing fields retain per-component store records, including
+writes through calls and reads through aliases of the whole owner. Default
+formatting, custom format hooks and compile-time field reflection inspect owners
+by reference. Borrowed owner links may form cycles without owning nesting.
 Root literals must be immediate declaration initializers;
 `State { .. }` supplies field defaults. Root padding is rejected because the owner
 has no packed layout; put padding in an ordinary component struct instead.
 
-The remaining document describes the target. Establish root structs first;
-evaluating a stdlib replacement for `reusable` and `reusable[]` is a separate
-milestone and is not a prerequisite for shipping root structs.
+The following records the v1 contract and the separately identified follow-ups.
+Evaluating a stdlib replacement for `reusable` and `reusable[]` is a separate
+milestone; existing reusable syntax and runtime behavior remain unchanged.
 
 ## Motivation
 
@@ -184,6 +185,15 @@ branches, rebinding, calls, returned references, globals, captures, and stored
 references. An unknown reference carries a conservative set of possible
 regions; never promote a lifetime bound to an exact component identity.
 
+Implementation: a synthetic variable represents each component. Class roots
+can carry the same projection without claiming a concrete owner. A separate
+`projected` proof records that a view stays inside that field's region, allowing
+the checker to exclude sibling fields even after an owner reference was loaded
+from a holder. Ordinary references read out of the field lose this proof;
+self-relative links retain it. Joins intersect the proof, weakening drops it,
+and return/effect summaries preserve it. This is distinct from exact identity,
+which operations such as `index_of` still require.
+
 In particular:
 
 * Growing one field does not interfere with construction in another field.
@@ -201,14 +211,13 @@ In particular:
 * Read-back, holder/store records, effect summaries, construction conflicts,
   and recursive specialization must propagate component identities consistently.
 
-Code to audit includes `RootAlt`/`Roots` in `src/ast.h`,
+Relevant code includes `RootAlt`/`Roots` in `src/ast.h`,
 `RootedAtReceiver`/`OneArrayOf` in `src/typecheck_types.h`, and
-`SoleResizableIn`, growth logs, and shrink summaries in
-`src/typecheck_builtins.h`. Root-set joins currently merge entries by owning
-variable. Adding field paths therefore requires changes to the rules for joins,
-equality, and caching as well as a new field in the data structure. Existing
-packed structs can still share one region; a field path does not always identify
-a separate region.
+`SoleResizableIn`, growth logs and shrink summaries in
+`src/typecheck_builtins.h`. Root-set joins merge entries by variable identity,
+with separate synthetic identities for independent components; domain tests
+cover the additional proof's join/equality laws. Existing packed structs still
+share one region: a field path is not automatically a new region everywhere.
 
 During investigation, small typecheck probes against the available compiler
 showed that a scalar allocator with separate data and freelist arguments accepts
@@ -514,3 +523,21 @@ repository's baseline compiler/runtime suite for the complete feature. Extend
 `test/compiler_roots.cpp` when changing root-set laws. Keep performance probes
 repeatable and compare equivalent algorithms; do not conflate a different
 freelist policy with root-reference overhead.
+
+### V1 validation record
+
+The Windows x64 baseline passed on 2026-10-16 with MSVC and TinyCC, including
+1,175 parse/round-trip/typecheck checks, 556 native O0/O2 program checks, 138
+runtime-debug checks, 673 JIT runs, the compiler root-domain tests, generated-C
+cache/hoisting assertions, and the runnable reference examples. The focused
+assertion-enabled compiler pass also accepted/rejected all 65 root-specific
+fixtures as expected, including optimized code generation for positive cases.
+The baseline includes native worker-local ownership and transitive worker-global
+rejection; TinyCC does not run worker programs. Optional audio/gfx/physics/UI
+modules were not built. Linux/macOS and sanitizer CI were not run locally.
+
+The native performance results above cover a preserved call boundary and the
+existing array caches. They do not establish a performance guarantee for every
+aliasing pattern or a migration result for reusable pools. Implementation steps
+1–4 are complete; step 5 remains an independent follow-up, alongside the explicit
+v2 candidates.

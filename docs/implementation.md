@@ -756,18 +756,20 @@ type once per argument list (cached on the `TypeStruct`/`TypeEnum` detail
 and searched by argument equality for clones), substitute the field types,
 validate them, and compute the derived properties every later pass reads:
 
-* the **size class** (`ClassOf`). A resizable field must be last, with no
+* the **size class** (`ClassOf`). An explicit `root struct`
+  (`SStruct::isroot`) is `SC_ROOT` regardless of its fields. In an ordinary
+  struct, a resizable field must be last, with no
   padding after it, and makes the struct resizable. This also applies to a
   payload's resizable field. Any variable-class part makes the type
   variable-class; `varint` fields and varint-width relative references are
   variable-class. A limited array is fixed with a static capacity and variable
   with `[..]`. A fixed-mode enum is fixed; a variable-mode enum uses its
   `varclass`;
-* `flat` (no references anywhere), what threads and queues require;
+* `flat` (no references anywhere, and never a root owner), what threads and queues require;
 * `frameobj` (C.2): a resizable-tailed struct whose other fields are all
   fixed-size and free of relative references, and whose tail is an array or
   itself a frame object. This is the shape that codegen keeps in the frame
-  as a C struct, with the tail's header last;
+  as a C struct, with the tail's header last. A root owner is not a frame object;
 * `validated`, which is false while the instantiation is being built and so
   detects a struct or enum that contains itself by value, and per variant
   `vbuilt`, which does the same for a variant type held by value in a
@@ -813,6 +815,62 @@ payload that is not itself resizable holds self-relative references. It
 does so at the enum's declaration, once all variants are built. A
 resizable payload, which the C backend does not bind at all yet, is left
 alone.
+
+**Root owners and component regions.** Root ownership is valid only at a local
+or global declaration, with an immediate literal initializer (including the
+default initializer of a typed global). `ValidateType` forbids by-value
+containment, arguments and results; construction, assignment, copy, image,
+equality, FFI and worker checks reject operations requiring a whole value.
+References remain ordinary reference types. Recursive-cycle checks use
+`NeedsCycleStack`: a root with nonfixed components needs dynamic stacks, while
+an all-fixed root does not.
+
+`RootComponent` gives each field a synthetic `VarDef`, sharing its owner's
+scope, depth and lifetime but with an independent storage identity. Local
+components participate in the ordinary variable/effect machinery; global
+components are explicitly included in storage candidates and global shrink
+checks. `componentowner`, `componentbase` and `componentfield` identify the
+projection, preserved across loop rechecks and optimizer remapping. The
+descriptor's own region does not contain the component storage (`CanContain`).
+Ordinary packed fields within a component still share that component's region.
+
+A parameter class can also have component projections, without a concrete
+storage type. `ProjectRoots`, `ProjectClass` and `MapClass` carry these paths
+through calls, returns and external growth/shrink/store summaries. Specialization
+keys record when a separate argument is one of another argument's root fields
+(`RootArg::ownerparam`/`ownerfield`). Recursive back edges map every parameter
+sharing a class, and newly discovered component projections inherit earlier
+class uses. Following a stored owner reference collapses the lifetime bound
+back to the enclosing class, so linked owners do not produce infinitely deep
+synthetic paths.
+
+`RootAlt::projected` proves that a view is inside a particular root field's
+own region even when the owner instance is only lifetime-bounded. It permits
+excluding sibling fields without claiming exact owner identity. Joins keep the
+proof only when both alternatives have it, weakening removes it, and reading
+an ordinary reference out of the component loses it. Self-relative reads stay
+within the region. `LiveShrink` carries the same proof across calls; the root
+domain tests cover its join laws. Holders have per-component store records,
+including reference-valued fields, and a whole-owner traversal visits those
+records. An alias of the descriptor must not conceal references stored in its
+components.
+
+The C backend binds every component through the existing local/global storage
+path and constructs a private descriptor of component references. Fixed fields
+use pointers, variable fields their byte representation, and resizables their
+usual header and stack reference. Direct projections use component locations;
+whole-owner references use a descriptor pointer. Reference-valued fields need
+the address of their reference slot in the descriptor. Allocation, partial
+construction and all scope exits use ordinary component watermarks. Captures
+and mutable receivers preserve the existing sampling order.
+
+Immutable exact owner parameters cache component tops and lengths when their
+storage is distinct from other arguments and globals. Potentially aliased
+owner/owner, owner/array and owner/global paths use the shared memory top.
+Call synchronization accounts for all stacks reached through root arguments
+and captures; array-view hoisting recognizes component projections. Generated
+C checks exercise these decisions. See [the design and measurements](design/root_structs.md)
+for v1 boundaries, the repeatable native benchmark and deferred ABI work.
 
 An array literal uses its destination's type when one is available.
 Otherwise it is a `T[k]` for fixed-size elements or a `T[]` for non-fixed

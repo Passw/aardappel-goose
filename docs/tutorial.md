@@ -1601,10 +1601,14 @@ imposes it.
   stale index, and it is up to you to avoid it
   ([section 11](#11-lifetimes-that-do-not-nest);
   [spec §9.4](goose_spec.md#94-type-safe-reuse-and-stale-references)).
-* **v1 omissions** you will notice: no move for resizables, one resizable per
-  struct, no labeled break, no namespace privacy
+* **v1 omissions** you will notice: no move for resizables, no nested owning
+  root structs or arrays of them, no labeled break, no namespace privacy
   ([spec §12](goose_spec.md#12-builtins-the-standard-library-and-what-v1-leaves-out)),
   no subprocesses or networking in the library yet ([`os`](stdlib.md#os)).
+
+An ordinary struct still has at most one resizable tail. For library state
+owning several arrays, use a [`root struct`](reference.md#root-structs-for-library-state)
+declared as one local or global, and pass it by reference.
 
 ---
 

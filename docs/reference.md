@@ -583,7 +583,7 @@ This section is short, but everything after it rests on it.
 
 ### Size classes
 
-Every type is in one of three **size classes**:
+Every type is in one of four **size classes**:
 
 * **fixed**: the byte size is a compile-time constant. Scalars, structs of
   fixed fields, fixed arrays `T[k]`, static-capacity arrays `T[..k]`,
@@ -594,10 +594,14 @@ Every type is in one of three **size classes**:
 * **resizable**: the size may change after construction. `T[>..]`
   (grow-only) and `T[>..<]` (grow-shrink), and a struct whose last field is
   one of them.
+* **root**: a `root struct` owns independently stored fields under one lifetime.
+  It has no contiguous value layout and is owned only by a local or global
+  declaration. See [Root structs](#root-structs-for-library-state).
 
-A compound type's class is the largest of its parts' classes. A type is
+An ordinary compound type's class is the largest of its parts' classes. A root
+struct always retains its class, even with only fixed fields. A type is
 **flat** when it holds no reference, slice or relative reference at any
-depth; only flat values may cross between threads
+depth and is not a root struct; only flat values may cross between threads
 ([section 22](#22-threads)). Spec §1.1.
 
 ### Data stacks
@@ -834,9 +838,13 @@ time. Spec §3.3.
   computing its offset, which is fine while iterating and costly for
   random access.
 * **Resizable** values go in locals and globals, by-value parameters,
-  results, and the **last field** of a struct, which makes the struct
-  resizable too. A resizable value is never an array element, and a struct
-  has at most one.
+  results, and the **last field** of an ordinary struct, which makes the struct
+  resizable too. A root struct can own several, in any field position. Never
+  an array element.
+* **Root** owners go only in local/global declarations. A root cannot be
+  owned inside another struct, an array or slice (even a fixed-size array),
+  or an enum payload, or passed or returned by value. References to roots
+  follow the ordinary reference rules.
 * **Zero-size** values (`T[0]`, `T[..0]`, a variant with no fields) exist
   only as values of their own, never as a field or an element.
 
@@ -1148,7 +1156,7 @@ fn main() {
 struct Unit { kind: i32, hp: i32 = 100, x: f32, y: f32, name: u8[] }
 ```
 
-A struct is its fields in declaration order, **packed**: no padding is
+An ordinary struct is its fields in declaration order, **packed**: no padding is
 inserted, unaligned access is assumed cheap, and a struct of an `i8[3]` and
 an `i32` is 7 bytes. Struct declarations introduce nominal types; two
 structs with the same fields are different types.
@@ -1287,7 +1295,7 @@ Spec §3.4, §3.6.
 
 ### A resizable tail
 
-A struct's **last** field may be a resizable array, which makes the struct
+An ordinary struct's **last** field may be a resizable array, which makes the struct
 resizable: it can live wherever a growable array can (a local, a global, a
 by-value parameter, a result), but never as an element or a middle field. The
 tail grows through the struct like any growable array.
@@ -1310,6 +1318,65 @@ main [7] 1
 ```
 
 Spec §3.4, Appendix C.2.
+
+### Root structs for library state
+
+Use `root struct` when one library instance needs several independently growing
+arrays. Its fields can be fixed, variable or resizable, in any order. Each field
+has its own storage, with the lifetime of the owning variable:
+
+```goose
+root struct Workspace<T> {
+    items: T[>..] = [],
+    scratch: i64[>..<] = [],
+    calls: i64 = 0
+}
+
+fn add<T>(s: Workspace<T>&, value: T) -> T& {
+    s.calls += 1;
+    let result .= s.items.push(value);
+    s.scratch.push(s.calls);
+    s.scratch.clear();                // does not invalidate result
+    return result;
+}
+
+fn main() {
+    var state = Workspace<i64> { .. };
+    let first .= state.add(7);
+    state.add(8);
+    print(first, " ", state.items, " ", state.calls);
+}
+```
+
+```
+7 [7, 8] 2
+```
+
+Construct an owner with a literal directly in a local or global declaration.
+Field defaults and `..` work normally; a typed global may omit its initializer.
+The compiler determines all component stacks statically and restores them on
+scope exit. Existing recursive-cycle restrictions apply to owners with nonfixed
+fields: declare such state outside the cycle and pass a reference into it.
+
+Functions receive a root by reference. An unannotated binding from an existing
+owner also borrows it; `.=` is available to make that intent explicit. Owner
+references can be optional, stored in ordinary structs or arrays, returned, and
+captured by nested functions, subject to normal lifetime and writability rules.
+Field access, UFCS, reflection and formatting work through those references.
+
+The owner itself cannot be copied, reassigned, passed or returned by value, used
+as a temporary, or placed inside another struct or array. This applies even to a
+root with no resizable fields. `root` only acts as a modifier before `struct`;
+variables, fields and functions may still be named `root`.
+
+A root has no packed byte image, whole-value equality or arithmetic, or public
+C layout. `pad` belongs in an ordinary component struct, not on the root.
+Serialize eligible fields separately, for example `to_bytes(state.items)`;
+that image contains only the selected component. Workers can construct local
+roots but cannot receive owners or owner references, or use a root global
+directly or through another function. A root global unused by a worker is fine.
+Nested owning roots and fixed arrays of owners are deferred. Spec §3.4,
+Appendix C.2.
 
 ### Generic structs
 
@@ -1336,7 +1403,7 @@ Spec §3.2.
 
 ### Equality and arithmetic
 
-`==` and `!=` compare structs memberwise, excluding pads; a reference or
+`==` and `!=` compare ordinary structs memberwise, excluding pads; a reference or
 slice *field* compares by identity (address and length), since recursing
 through it could loop. The arithmetic operators apply memberwise
 ([section 3](#arithmetic-on-structs-and-fixed-arrays)). Ordering operators

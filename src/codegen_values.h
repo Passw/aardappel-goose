@@ -196,7 +196,7 @@ inline void CodeGen::PinLoc(Loc &lv) {
 inline CodeGen::Loc CodeGen::VarLoc(VarDef *vd) {
     Loc l;
     l.t = vd->type;
-    if (IsRoot(l.t)) l.rootowner = vd;
+    if (IsRoot(l.t) && !fvptr.count(vd)) l.rootowner = vd;
     if (auto ait = refalias.find(vd); ait != refalias.end()) {
         auto tg = const_cast<VarDef *>(ait->second);
         if (auto pit = aliaspath.find(vd); pit != aliaspath.end()) {

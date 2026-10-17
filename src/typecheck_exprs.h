@@ -670,18 +670,7 @@ inline void TypeCheck::ResolveMemberLValue(LVal &lv, Dot *d) {
         if (inst->st->isroot) {
             auto parent = lv.AsRoots();
             if (step(inst->st->fields, inst->ftypes, true)) {
-                Roots components;
-                components.unknown = parent.unknown;
-                for (auto a : parent.alts) {
-                    if (!a.exact || !a.root || !a.root->type ||
-                        (!a.root->isglobal && a.root->ownerspec != CurRealFrame().spec) ||
-                        !TypeEq(ast.PlainOf(a.root->type), ast.PlainOf(t)))
-                        Error(d, "root field projection through a parameter, capture or unknown owner "
-                                 "is not implemented yet");
-                    a.root = RootComponent(a.root, t, d->fieldidx);
-                    components.Add(a);
-                }
-                lv.TakeAlts(components);
+                lv.TakeAlts(ProjectRoots(parent, t, d->fieldidx));
                 return;
             }
         } else if (step(inst->st->fields, inst->ftypes, FieldsInFrame(d))) return;
@@ -770,8 +759,6 @@ inline bool TypeCheck::KeepsRef(const Val &v, TypeExpr *dt) {
 // through the reference, which is not so of an identity comparison's,
 // index_of's, or one bound to a `const T&`.
 inline Node *TypeCheck::AutoRef(Node *n, Val &v, bool writes) {
-    if (ClassOf(v.type) == SC_ROOT)
-        Error(n, "root owner references are not implemented yet; pass individual fields by reference");
     if (!Referenceable(n, v)) NoResizableRef(n);
     if (auto id = Is<Ident>(n); id && id->vdef && writes && v.writable)
         NoteWritableRef(id->vdef, n);
@@ -1467,8 +1454,6 @@ inline Val TypeCheck::VoidVal() {
 inline Val TypeCheck::CheckRefOf(Unary *x) {
     DestScope ds(*this, Dest {});
     auto lv = CheckLValue(x->child);
-    if (ClassOf(lv.type) == SC_ROOT)
-        Error(x, "root owner references are not implemented yet; pass individual fields by reference");
     if (lv.var) RequireAssigned(lv.var, x);
     // A resizable value has a header of its own only as a whole variable or
     // as a frame object's tail (C.2).

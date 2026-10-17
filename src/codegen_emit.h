@@ -204,14 +204,15 @@ inline void CodeGen::PlanTopClasses(FnSpec *sp) {
     auto isfv = [&](const VarDef *v) { return std::find(fvs.begin(), fvs.end(), v) != fvs.end(); };
     // A pool reference carries its stack (and its freelist's) as well.
     auto carries = [&](const VarDef *v) {
-        return v && (PrefVar(v) || (v->type && v->type->kind == TY_REF && IsResz(v->type->ref->sub)));
+        return v && (PrefVar(v) || (v->type && v->type->kind == TY_REF &&
+                                   (IsResz(v->type->ref->sub) || IsRoot(v->type->ref->sub))));
     };
     auto fatparam = false, fatfv = false, capresz = false, globals = false, unknown = false;
     for (size_t i = 0; i < sp->params.size(); i++)
         if (carries(sp->params[i]) || IsPoolParam(sp, i)) fatparam = true;
     for (auto fv : fvs) {
         if (fv->reusable || carries(fv)) fatfv = true;
-        else if (fv->type && IsResz(fv->type)) capresz = true;
+        else if (fv->type && (IsResz(fv->type) || IsRoot(fv->type))) capresz = true;
     }
     // A return exiting this function or an inlined body stays here; any
     // other target constructs into a gs_fdst_ channel (§7.9).
@@ -272,6 +273,13 @@ inline void CodeGen::PlanTopClasses(FnSpec *sp) {
 //    to a function further out constructs into (`farreturn`), a stack this
 //    body cannot place (§7.9).
 inline bool CodeGen::RefTopsOk(FnSpec *sp, bool farreturn) {
+    // Descriptor projections can alias any fat parameter's stack. They need
+    // the shared memory top until descriptor components have canonical caches.
+    for (auto pt : sp->argtypes)
+        if (pt->kind == TY_REF && IsRoot(pt->ref->sub)) return false;
+    for (auto fv : sinfo[sp].freevars)
+        if (fv->type && (IsRoot(fv->type) ||
+            (fv->type->kind == TY_REF && IsRoot(fv->type->ref->sub)))) return false;
     set<const VarDef *> fatparams, classes;
     vector<TypeExpr *> pointees;
     auto concrete = true;

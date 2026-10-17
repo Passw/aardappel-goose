@@ -9,14 +9,17 @@ synthetic variable identity sharing its owner's lifetime; ordinary packed fields
 inside a component continue to share that component's region.
 The backend currently materializes a private descriptor pointing at component
 storage; direct projections resolve to the underlying local/global locations.
-The function ABI for borrowing an entire owner is still pending.
+Whole-owner references use a pointer to this descriptor. Parameter classes keep
+component paths in return and mutation summaries, including when a separate
+argument names the same component. Local aliases, stored/optional references,
+returned references and captures work. Descriptor accesses conservatively share
+memory stack tops where aliases prevent independent caches.
 
 Workers may construct local roots, but cannot reach a root global through direct
 access or calls. Unused root globals do not prevent worker compilation.
 
-The current checkpoint explicitly rejects whole-owner references,
-field projection through parameters/captures, and construction of root fields
-containing references. These are implementation guards, not additions to the v1
+The current checkpoint explicitly rejects construction of root fields
+containing references. This is an implementation guard, not an addition to the v1
 language contract below. Root literals must be immediate declaration initializers;
 `State { .. }` supplies field defaults. Root padding is rejected because the owner
 has no packed layout; put padding in an ordinary component struct instead.

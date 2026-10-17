@@ -1493,6 +1493,20 @@ inline FnSpec *TypeCheck::GetOrCreateSpec(MatchInfo &mi, vector<Val> &argvals, N
         if (ra.exact) ra.pool = PoolOf(r);
         classify(ra, r);
     }
+    // Preserve an owner's relationship to a separately supplied component.
+    // This is a storage path, not a uniqueness assumption about the owner type.
+    for (size_t i = 0; i < roots.size(); i++) {
+        auto r = argroots[i];
+        if (!r || !r->componentowner || !roots[i].exact) continue;
+        for (size_t j = 0; j < roots.size(); j++) {
+            auto pt = mi.paramtypes[j];
+            if (!roots[j].exact || argroots[j] != r->componentowner ||
+                pt->kind != TY_REF || ClassOf(pt->ref->sub) != SC_ROOT) continue;
+            roots[i].ownerparam = (int)j;
+            roots[i].ownerfield = r->componentfield;
+            break;
+        }
+    }
     // The contents of an argument only the callee's parameters reach get
     // a class of their own, which a load through that parameter sees.
     auto reach = EnvReach(mi);
@@ -2997,7 +3011,8 @@ inline void TypeCheck::CheckSpecBodyOnce(FnSpec *spec, vector<Val> *argvals, Lin
                 // A pool class holds only references to resizable-class
                 // values; a slice or a reference to anything smaller may
                 // point at a cycle function's own storage.
-                if (pt->kind != TY_REF || ClassOf(pt->ref->sub) != SC_RESIZABLE ||
+                if (pt->kind != TY_REF ||
+                    (ClassOf(pt->ref->sub) != SC_RESIZABLE && ClassOf(pt->ref->sub) != SC_ROOT) ||
                     !ra.exact)
                     classroots[ra.cls]->poolclass = false;
                 if (!ra.exact) exactrefs[ra.cls] = false;
@@ -3057,6 +3072,17 @@ inline void TypeCheck::CheckSpecBodyOnce(FnSpec *spec, vector<Val> *argvals, Lin
             RecordStore(vd, held, ra.byteview, nullptr);
         }
         spec->params.push_back(vd);
+    }
+    for (size_t i = 0; i < spec->roots.size(); i++) {
+        auto &ra = spec->roots[i];
+        if (ra.ownerparam < 0) continue;
+        auto parent = spec->params[ra.ownerparam]->ref.Root();
+        auto t = spec->argtypes[ra.ownerparam]->ref->sub;
+        auto component = RootComponent(parent, t, ra.ownerfield);
+        auto old = classroots[ra.cls];
+        classroots[ra.cls] = component;
+        for (auto p : spec->params)
+            for (auto &a : p->ref.alts) if (a.root == old) a.root = component;
     }
     // A view's contents are a variable of the body, outside its loops.
     // Loads and stores through any alias see this binding or holder record;
@@ -3390,11 +3416,13 @@ inline Val TypeCheck::RetAltVal(FnSpec *spec, const RootAlt &alt, vector<Val> &a
     auto v = m;
     auto first = true;
     for (size_t p = 0; p < spec->params.size() && p < argvals.size(); p++) {
-        auto view = ViewClassOf(spec, p) == alt.root;
-        if (spec->params[p]->ref.Root() != alt.root && !view) continue;
+        auto view = ProjectedFrom(alt.root, ViewClassOf(spec, p));
+        if (!ProjectedFrom(alt.root, spec->params[p]->ref.Root()) && !view) continue;
         auto &a = argvals[p];
         auto x = m;
-        auto ar = view ? a.held.AsRoots() : ClassArgRoots(spec->argtypes[p], a);
+        auto base = view ? ViewClassOf(spec, p) : spec->params[p]->ref.Root();
+        auto ar = ProjectClass(alt.root, base,
+                               view ? a.held.AsRoots() : ClassArgRoots(spec->argtypes[p], a));
         x.TakeAlts(alt.exact ? ar : Bounds(ar));
         for (auto &xa : x.alts) xa.slotread = alt.slotread && xa.slotread;
         if (alt.classread)

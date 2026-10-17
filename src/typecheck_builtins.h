@@ -1679,17 +1679,10 @@ inline void TypeCheck::ApplyCalleeStores(FnSpec *spec, vector<Val> &argvals, Nod
     // What class root cr of the callee stands for here: the argument's roots,
     // or for a view the slice its slot held (Val::held).
     auto classat = [&](VarDef *cr, Roots &out) -> int {
-        for (size_t p = 0; cr && p < spec->params.size() && p < argvals.size(); p++) {
-            if (spec->params[p]->ref.Root() == cr) {
-                out = ClassArgRoots(spec->argtypes[p], argvals[p]);
-                return (int)p;
-            }
-            if (ViewClassOf(spec, p) == cr) {
-                out = argvals[p].held;
-                return (int)p;
-            }
-        }
-        return -1;
+        bool view = false;
+        auto p = ClassParam(spec, cr, view);
+        if (p >= 0 && p < (int)argvals.size()) out = MapClass(spec, cr, argvals);
+        return p;
     };
     auto paramof = [&](VarDef *cr) -> int {
         for (size_t p = 0; p < spec->params.size() && p < argvals.size(); p++)
@@ -2001,6 +1994,11 @@ inline void TypeCheck::NoteClassUses(FnSpec *spec, const vector<Val> &argvals) {
         if (!IsRefOrSlice(pt) && !IsTemp(argvals[p].holderfrom)) u.src = argvals[p].holderfrom;
         u.byteview = argvals[p].byteview;
         NoteClassUse(cr, u);
+        for (auto c : cr->components) {
+            ClassUse projected;
+            projected.roots = ProjectRoots(u.roots, c->componentbase, c->componentfield);
+            NoteClassUse(c, projected);
+        }
     }
 }
 
@@ -2458,6 +2456,12 @@ template <typename P, typename X>
 inline void TypeCheck::NoteRootEvent(VarDef *root, P param, X external) {
     auto current = CurRealFrame().spec;
     if (!current) return;
+    // A projected class is a path-bearing effect. Keeping the path in the
+    // external map lets call-site translation project each possible owner.
+    if (root->componentowner && IsClassRoot(root)) {
+        external(current, root);
+        return;
+    }
     if (root->type) {
         if (root->isglobal || root->ownerspec != current) external(current, root);
         return;
@@ -3094,10 +3098,11 @@ inline void TypeCheck::ApplyCalleeLiveShrinks(Node *at, FnSpec *spec, vector<Val
     // A class root of the callee, as seen from here: every place the
     // argument may point, or for a view every place its slot's slice may.
     auto mapped = [&](VarDef *r, bool exact) -> Roots {
-        for (size_t p = 0; r && p < spec->params.size() && p < args.size(); p++) {
-            auto view = ViewClassOf(spec, p) == r;
-            if (spec->params[p]->ref.Root() != r && !view) continue;
-            auto m = view ? views[p] : args[p];
+        bool view = false;
+        auto p = ClassParam(spec, r, view);
+        if (p >= 0 && p < (int)args.size()) {
+            auto base = view ? ViewClassOf(spec, p) : spec->params[p]->ref.Root();
+            auto m = ProjectClass(r, base, view ? views[p] : args[p]);
             if (!exact) m.Weaken();
             return m;
         }
@@ -3109,6 +3114,8 @@ inline void TypeCheck::ApplyCalleeLiveShrinks(Node *at, FnSpec *spec, vector<Val
     // resizable value, which a shrink of the class shrinks: the type an
     // argument's root that only bounds it leads to (ApplyCalleeShrinks).
     auto storage = [&](VarDef *r) -> TypeExpr * {
+        if (r && r->componentbase)
+            return LoadType(GetStructInst(r->componentbase)->ftypes[r->componentfield]);
         for (size_t p = 0; r && p < spec->params.size() && p < spec->argtypes.size(); p++) {
             auto pt = spec->argtypes[p];
             if (spec->params[p]->ref.Root() == r && pt->kind == TY_REF &&
@@ -3451,11 +3458,16 @@ inline void TypeCheck::ApplyCalleeShrinks(Node *at, FnSpec *spec, vector<Val> &a
         }
         shrink(roots, b.type, "may shrink", b.balance, orderof(b.key, nullptr, b.type), true);
     }
-    for (auto &[vd, balance] : rec->shrinkexternals)
-        shrink(RootsOf(vd), nullptr, "shrinks", balance, orderof(-1, vd, nullptr));
+    for (auto &[vd, balance] : rec->shrinkexternals) {
+        auto storage = vd->componentbase
+                           ? LoadType(GetStructInst(vd->componentbase)->ftypes[vd->componentfield])
+                           : nullptr;
+        shrink(MapClass(spec, vd, argvals), storage, "shrinks", balance,
+               orderof(-1, vd, nullptr));
+    }
     for (auto &b : rec->shrinkexternalbounds) {
-        Roots one;
-        one.Set(b.key, false);
+        auto one = MapClass(spec, b.key, argvals);
+        one.Weaken();
         shrink(one, b.type, "may shrink", b.balance, orderof(-1, b.key, b.type));
     }
     // A balanced shrink frees nothing a view of the array taken before
@@ -3526,6 +3538,9 @@ inline TypeCheck::Alias TypeCheck::MayAliasRoots(VarDef *a, bool aexact, VarDef 
                                                  bool bexact, FnSpec *current) {
     if (!a || !b || IsTemp(a) || IsTemp(b)) return AL_NO;
     if (a == b) return AL_YES;
+    if (aexact && bexact && a->componentowner && b->componentowner &&
+        a->componentowner == b->componentowner && a->componentfield != b->componentfield &&
+        TypeEq(a->componentbase, b->componentbase)) return AL_NO;
     auto isclass = [](VarDef *v) { return !v->type; };
     auto own = [&](VarDef *v, bool exact) {
         return exact && v->type && !v->isglobal && v->ownerspec == current;
@@ -3644,7 +3659,7 @@ inline void TypeCheck::ApplyCalleeGrows(Node *at, FnSpec *spec, vector<Val> &arg
         for (auto arr : arrs) grows((size_t)pi, "grows", arr);
     for (auto &[vd, arrs] : rec->growexternals)
         for (auto arr : arrs)
-            NoteGrow(at, RootsOf(vd), cat("call ", name, ", which grows ", vd->name), arr);
+            NoteGrow(at, MapClass(spec, vd, argvals), cat("call ", name, ", which grows ", vd->name), arr);
 }
 
 // Whether storage of type y can be, or hold, the location `lval` assigned,

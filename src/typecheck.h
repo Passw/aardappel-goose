@@ -1388,6 +1388,14 @@ struct TypeCheck {
     Prov RefProvOf(VarDef *vd);
     VarDef *ResetLocal(VarDef *previous);
     VarDef *RootComponent(VarDef *owner, TypeExpr *t, int field);
+    Roots ProjectRoots(const Roots &parents, TypeExpr *t, int field);
+    bool ProjectedFrom(VarDef *root, VarDef *base) {
+        for (auto r = root; r; r = r->componentowner) if (r == base) return true;
+        return false;
+    }
+    int ClassParam(FnSpec *spec, VarDef *root, bool &view);
+    Roots ProjectClass(VarDef *root, VarDef *base, const Roots &args);
+    Roots MapClass(FnSpec *spec, VarDef *root, const vector<Val> &args);
     VarDef *NewVar(string_view name, TypeExpr *type, Line l, bool isvar,
                    VarDef *previous = nullptr);
     VarDef *LookupVar(string_view name, string_view ns, Node *use = nullptr);
@@ -1573,6 +1581,7 @@ struct TypeCheck {
     // other root.
     int ActivationFloor(VarDef *root) {
         if (!IsClassRoot(root)) return 0;
+        while (root->componentowner) root = root->componentowner;
         for (auto fi = (int)frames.size() - 1; fi >= 0; fi--) {
             auto &f = frames[fi];
             if (f.isfunval || !f.spec) continue;

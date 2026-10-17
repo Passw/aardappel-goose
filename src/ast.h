@@ -1657,6 +1657,9 @@ struct VarDef {
     vector<VarDef *> components;
     VarDef *componentowner = nullptr;
     int componentfield = -1;
+    // The root-owner type projected here. A parameter class has no concrete
+    // storage type; its components remain classes, with this path attached.
+    TypeExpr *componentbase = nullptr;
     // One of the results of `a, b = f();` (VarDecl::results), which its one
     // assignment takes as the call's value: constructed at the target, as
     // `a = f()` would construct it (TypeCheck::CheckAssign).
@@ -1893,6 +1896,8 @@ template<typename R> bool HasRelRefOf(TypeExpr *t, bool inpool, R runs) {
 // its depth stands, and the provenance bits.
 struct RootArg {
     int cls = 0;
+    int ownerparam = -1;
+    int ownerfield = -1;
     bool writable = true;
     int reusable = 0;
     // The argument may point into a grow-shrink array (§5.2): some root of
@@ -1981,7 +1986,8 @@ struct RootArg {
     // whose classes differ only here still passes the arrays they describe.
     int depthkey = 0;
     bool operator==(const RootArg &o) const {
-        return cls == o.cls && writable == o.writable && reusable == o.reusable &&
+        return cls == o.cls && ownerparam == o.ownerparam && ownerfield == o.ownerfield &&
+               writable == o.writable && reusable == o.reusable &&
                growshrink == o.growshrink && gsvia == o.gsvia && slotread == o.slotread &&
                byteview == o.byteview && pool == o.pool && heldexact == o.heldexact &&
                unknown == o.unknown;

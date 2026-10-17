@@ -594,12 +594,32 @@ inline VarDef *TypeCheck::ResetLocal(VarDef *previous) {
 inline VarDef *TypeCheck::RootComponent(VarDef *owner, TypeExpr *t, int field) {
     auto si = GetStructInst(t);
     assert(si->st->isroot && owner);
-    owner->components.resize(si->ftypes.size(), nullptr);
-    auto &c = owner->components[field];
-    if (!c) c = ast.NewVarDef();
+    VarDef *c = nullptr;
+    if (IsClassRoot(owner)) {
+        for (auto x : owner->components)
+            if (x && x->componentfield == field && TypeEq(x->componentbase, t)) return x;
+        c = ast.NewVarDef();
+        owner->components.push_back(c);
+    } else {
+        owner->components.resize(si->ftypes.size(), nullptr);
+        auto &slot = owner->components[field];
+        if (!slot) slot = ast.NewVarDef();
+        c = slot;
+    }
     c->componentowner = owner;
     c->componentfield = field;
-    c->type = si->ftypes[field];
+    c->componentbase = t;
+    auto ft = si->ftypes[field];
+    if (IsClassRoot(owner)) {
+        c->poolclass = owner->poolclass;
+        c->growshrink = ContainsGrowShrink(ft);
+        GrowShrinkElems(ft, c->gselems);
+        ReachedThroughRefs(ft, c->classreach);
+        vector<TypeExpr *> elems, open;
+        ArrayElemsReached(ft, elems, open);
+        for (auto e : elems)
+            if (ElemArrayPlaces(ft, e) == 1) c->onearray.push_back(e);
+    } else c->type = ft;
     c->name = ast.Intern(cat(owner->name, ".", si->st->fields[field].name));
     c->line = owner->line;
     c->depth = owner->depth;
@@ -608,6 +628,60 @@ inline VarDef *TypeCheck::RootComponent(VarDef *owner, TypeExpr *t, int field) {
     c->isvar = owner->isvar;
     c->assigned = c->maybeassigned = true;
     return c;
+}
+
+inline Roots TypeCheck::ProjectRoots(const Roots &parents, TypeExpr *t, int field) {
+    Roots out;
+    out.unknown = parents.unknown;
+    for (auto a : parents.alts) {
+        if (a.root && (IsClassRoot(a.root) ||
+                      (a.root->type && TypeEq(ast.PlainOf(a.root->type), ast.PlainOf(t))))) {
+            a.root = RootComponent(a.root, t, field);
+            out.Add(a);
+        } else {
+            // A loaded owner reference may only have a lifetime bound. Enumerate
+            // the owners it can reach; never invent an exact owner from that bound.
+            auto candidates = RootCandidates(t, Depth(a.root), !a.root || a.root->isglobal,
+                                             true, false);
+            for (auto b : candidates.alts) {
+                if (!b.root || b.root == a.root) continue;
+                if (IsClassRoot(b.root) || (b.root->type &&
+                    TypeEq(ast.PlainOf(b.root->type), ast.PlainOf(t)))) {
+                    b.root = RootComponent(b.root, t, field);
+                    b.slotread = a.slotread;
+                    out.Add(b);
+                }
+            }
+            if (out.None()) out.Add({ a.root, false, a.from, a.slotread, a.classread });
+        }
+    }
+    return out;
+}
+
+// Find the argument naming a class or an ancestor of a projected class.
+inline int TypeCheck::ClassParam(FnSpec *spec, VarDef *root, bool &view) {
+    for (auto r = root; r; r = r->componentowner)
+        for (size_t p = 0; p < spec->params.size(); p++) {
+            view = ViewClassOf(spec, p) == r;
+            if (spec->params[p]->ref.Root() == r || view) return (int)p;
+        }
+    return -1;
+}
+
+inline Roots TypeCheck::ProjectClass(VarDef *root, VarDef *base, const Roots &args) {
+    if (root == base) return args;
+    assert(root && root->componentowner);
+    return ProjectRoots(ProjectClass(root->componentowner, base, args),
+                        root->componentbase, root->componentfield);
+}
+
+inline Roots TypeCheck::MapClass(FnSpec *spec, VarDef *root, const vector<Val> &args) {
+    bool view = false;
+    auto p = ClassParam(spec, root, view);
+    if (p < 0 || p >= (int)args.size()) return RootsOf(root);
+    auto base = view ? ViewClassOf(spec, p) : spec->params[p]->ref.Root();
+    return ProjectClass(root, base, view ? args[p].held.AsRoots()
+                                        : ClassArgRoots(spec->argtypes[p], args[p]));
 }
 
 inline VarDef *TypeCheck::NewVar(string_view name, TypeExpr *type, Line l, bool isvar,

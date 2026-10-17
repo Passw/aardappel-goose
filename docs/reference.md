@@ -596,7 +596,7 @@ Every type is in one of four **size classes**:
   one of them.
 * **root**: a `root struct` owns independently stored fields under one lifetime.
   It has no contiguous value layout and is owned only by a local or global
-  declaration. See [Root structs](#root-structs-for-library-state).
+  declaration. See [Root structs](#root-structs).
 
 An ordinary compound type's class is the largest of its parts' classes. A root
 struct always retains its class, even with only fixed fields. A type is
@@ -1319,11 +1319,17 @@ main [7] 1
 
 Spec §3.4, Appendix C.2.
 
-### Root structs for library state
+### Root structs
 
-Use `root struct` when one library instance needs several independently growing
-arrays. Its fields can be fixed, variable or resizable, in any order. Each field
-has its own storage, with the lifetime of the owning variable:
+Like an ordinary struct, a `root struct` bundles related state behind named
+fields. It lifts the requirement that those fields form one contiguous value:
+each field has independent storage, so several fields can grow separately.
+Fields can be fixed, variable or resizable, in any order, and all share the
+lifetime of the owning variable.
+
+The tradeoff is placement: an owning root struct must be a local or global
+variable, rather than a field or array element. It can group application state,
+a workspace, or a library instance:
 
 ```goose
 root struct Workspace<T> {

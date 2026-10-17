@@ -1606,9 +1606,10 @@ imposes it.
   ([spec §12](goose_spec.md#12-builtins-the-standard-library-and-what-v1-leaves-out)),
   no subprocesses or networking in the library yet ([`os`](stdlib.md#os)).
 
-An ordinary struct still has at most one resizable tail. For library state
-owning several arrays, use a [`root struct`](reference.md#root-structs-for-library-state)
-declared as one local or global, and pass it by reference.
+An ordinary struct still has at most one resizable tail. A
+[`root struct`](reference.md#root-structs) bundles state with independently
+stored fields, including multiple resizable arrays. Declare the owner as a
+local or global variable and pass it by reference.
 
 ---
 

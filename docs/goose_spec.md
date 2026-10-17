@@ -434,6 +434,18 @@ Growth always supplies element values, so no operation can expose
 uninitialized slots (§5.3). Per UFCS these are ordinary functions:
 `a.push(v)` is `push(a, v)`.
 
+`a.range_index(s) -> i64`, on the same array kinds and fixed-size element
+types as `index_of`, returns the start index of a slice of those elements.
+Unless exact provenance proves containment, a nonempty slice is checked for
+element alignment and complete containment within the receiver's current
+length. An empty slice from any origin returns zero. A failed check aborts in
+every build. `a.check_length(n) -> i64`, on resizable arrays of fixed-size
+elements, rejects a negative count or one whose element bytes exceed a
+data-stack reservation and otherwise returns the count. It evaluates the count
+once and changes no storage; it does not reserve space or check the space left
+after the array's current contents. These operations do not weaken `index_of`'s
+static provenance requirement.
+
 ### 3.4 Placement rules (what may contain what)
 
 * **fixed** values: anywhere (locals, globals, fields at any position, array
@@ -4471,6 +4483,8 @@ And the array members, ordinary functions of their receiver per UFCS
 | `.append(src)` | limited, grow-only, grow-shrink | an array or slice of elements (§3.3) |
 | `.pop() -> T`, `.pop_n(n)`, `.resize(n, v?)`, `.clear()` | limited, grow-shrink; grow-only where §5.1 allows a shrink | shrinking, and growing with a fill value (§3.3, §5) |
 | `.index_of(r) -> i64` | fixed, limited, grow-only, grow-shrink | the index of the element `r` refers to (§3.3) |
+| `.range_index(s) -> i64` | the same, fixed-size elements | checked start of a contained slice; zero for empty (§3.3) |
+| `.check_length(n) -> i64` | grow-only, grow-shrink, fixed-size elements | validate a count without allocating (§3.3) |
 | `.alloc_index(v) -> i64`, `.alloc_ref(v) -> T&`, `.free(i)` | `reusable` pools | slot reuse (§5.4) |
 | `.alloc_slice(n) -> T[:]`, `.realloc_slice(s, n) -> T[:]`, `.free_slice(s)` | `reusable[]` pools | slice reuse (§5.4) |
 

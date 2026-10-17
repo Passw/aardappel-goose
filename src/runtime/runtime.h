@@ -204,6 +204,8 @@ enum {
     GS_E_RELNULL,      /* a non-null optional self-relative target has offset zero */
     GS_E_POPN,         /* pop_n of a negative count or more than the length */
     GS_E_QBOUND,       /* a queue limit of zero or less */
+    GS_E_ARRAYLEN,     /* array element count negative or beyond a data stack */
+    GS_E_ARRAYSLICE,   /* a nonempty slice is not wholly inside the array */
 };
 
 GS_API GS_NORETURN void gs_panic(const char *msg);

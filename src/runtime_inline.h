@@ -217,6 +217,8 @@ R"GSRT(    GS_E_THREADID,     /* thread_wait on an unknown thread id */
     GS_E_RELNULL,      /* a non-null optional self-relative target has offset zero */
     GS_E_POPN,         /* pop_n of a negative count or more than the length */
     GS_E_QBOUND,       /* a queue limit of zero or less */
+    GS_E_ARRAYLEN,     /* array element count negative or beyond a data stack */
+    GS_E_ARRAYSLICE,   /* a nonempty slice is not wholly inside the array */
 };
 
 GS_API GS_NORETURN void gs_panic(const char *msg);
@@ -365,10 +367,10 @@ static inline int gs_simd_level(void) {
 }
 #endif
 
-/* math's mul_add (runtime_ext.h): x * y + z, rounded once where the code
-   is built for FMA and twice where it is not, so its results are the
 )GSRT"
-R"GSRT(   implementation's (§7.12). GS_MUL_ADD_BASE says which for code built for
+R"GSRT(/* math's mul_add (runtime_ext.h): x * y + z, rounded once where the code
+   is built for FMA and twice where it is not, so its results are the
+   implementation's (§7.12). GS_MUL_ADD_BASE says which for code built for
    the target as a whole: fused on arm64 and on x86-64 built for AVX2 or
    past it (-march=x86-64-v3, clang-cl's /arch:AVX2), separate everywhere
    else, under TinyCC and under MSVC. MSVC compiles fma() to a call into the
@@ -522,11 +524,11 @@ static int gs_memeq(const void *a, const void *b, size_t n) {
    runtime across the benchmarks.
 
    The signed types' add, sub, mul and neg also take the file and line of the
-   operation, for the debug build's overflow message; the release macros
+)GSRT"
+R"GSRT(   operation, for the debug build's overflow message; the release macros
    drop them unevaluated. */
 
-)GSRT"
-R"GSRT(/* Division and modulo, both builds: the zero check is not optional, `%` is
+/* Division and modulo, both builds: the zero check is not optional, `%` is
    Euclidean, and i64.min / -1 aborts. They are macros for the reason the
    other operations are, but each names its operands more than once, so the
    compiler passes side-effect-free ones (as GS_IDX's index); a signed
@@ -684,11 +686,11 @@ static uint64_t gs_shr_u64(uint64_t a, int64_t n) { return a >> (n & 63); }
 #define gs_mul_i32(a, b, f, l) ((int32_t)((int64_t)(a) * (int64_t)(b)))
 #define gs_neg_i32(a, f, l)    ((int32_t)(-(int64_t)(a)))
 #define gs_shl_i32(a, n) ((int32_t)((uint64_t)(a) << ((n) & 31)))
-#define gs_shr_i32(a, n) ((int32_t)((int64_t)(a) >> ((n) & 31)))
+)GSRT"
+R"GSRT(#define gs_shr_i32(a, n) ((int32_t)((int64_t)(a) >> ((n) & 31)))
 
 #define gs_add_u8(a, b)  ((uint8_t)((a) + (b)))
-)GSRT"
-R"GSRT(#define gs_sub_u8(a, b)  ((uint8_t)((a) - (b)))
+#define gs_sub_u8(a, b)  ((uint8_t)((a) - (b)))
 #define gs_mul_u8(a, b)  ((uint8_t)((uint64_t)(a) * (uint64_t)(b)))
 #define gs_shl_u8(a, n)  ((uint8_t)((uint64_t)(a) << ((n) & 7)))
 #define gs_shr_u8(a, n)  ((uint8_t)((uint64_t)(a) >> ((n) & 7)))
@@ -885,10 +887,10 @@ static uint64_t gs_f2uchk(double d, int f32, const char *file, int line) {
     if ((double)v != d) gs_asfail_f("changes the value", d, f32, "u64", file, line);
     return v;
 }
-#define GS_RANGE(v, lo, hi, t, f, l) gs_rangechk((v), (lo), (hi), (t), (f), (l))
-#define GS_RANGE_U(v, hi, t, f, l)   gs_rangechk_u((v), (hi), (t), (f), (l))
 )GSRT"
-R"GSRT(#define GS_F2I(d, s, lo, hi, t, f, l) gs_f2ichk((d), (s), (lo), (hi), (t), (f), (l))
+R"GSRT(#define GS_RANGE(v, lo, hi, t, f, l) gs_rangechk((v), (lo), (hi), (t), (f), (l))
+#define GS_RANGE_U(v, hi, t, f, l)   gs_rangechk_u((v), (hi), (t), (f), (l))
+#define GS_F2I(d, s, lo, hi, t, f, l) gs_f2ichk((d), (s), (lo), (hi), (t), (f), (l))
 #define GS_F2U(d, s, f, l)            gs_f2uchk((d), (s), (f), (l))
 
 #else
@@ -1069,11 +1071,11 @@ static int64_t gs_thread_spawn(void (*entry)(uint8_t *), const void *args, int64
 }
 #endif
 
-#endif  /* GS_RUNTIME_OBJECT */
+)GSRT"
+R"GSRT(#endif  /* GS_RUNTIME_OBJECT */
 
 /* ---------------------------------------------------------------------------
-)GSRT"
-R"GSRT(   Slice pools (§5.4, `reusable[]`). A pool's freelist is a tree of its free
+   Slice pools (§5.4, `reusable[]`). A pool's freelist is a tree of its free
    (index, count) spans, kept on a data stack of its own in nodes of
    GS_SPAN_NODE bytes (runtime_impl.h). The emitted code grows the element
    region and fills elements; these only keep the spans, and each takes the
@@ -1263,6 +1265,8 @@ static const char *gs_errmsgs[] = {
     "non-null relative reference encodes as null",
     "pop_n count negative or beyond the array's length",
     "queue limit of zero or less",
+    "invalid array length",
+    "slice not within this array",
 };
 
 /* Ends the process with `code`, its streams flushed: exit() and every

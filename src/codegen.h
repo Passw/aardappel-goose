@@ -1379,7 +1379,7 @@ struct CodeGen {
     vector<string> EmitSlicePool(Call *c, vector<Node *> &an, Line ln);
     string SpanArgs(const Loc &lv);
     string PlaceRun(const Loc &lv, const string &n);
-    string SliceLen(Node *n, TypeExpr *elem, Line ln);
+    string SliceLen(Node *n, TypeExpr *elem, Line ln, const char *error = "GS_E_SLICELEN");
     void EmitSliceExtend(const Loc &lv, const string &end, int64_t esz);
     void EmitDefaultElems(const ArrView &v, const string &first, const string &count, Node *init);
 

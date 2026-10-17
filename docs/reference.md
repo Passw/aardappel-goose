@@ -905,12 +905,21 @@ read the same way.
 | `.resize(n, v)`, `.resize(n)` | the same | grows with copies of `v`, or shrinks |
 | `.clear()` | the same | empties the array |
 | `.index_of(r) -> i64` | arrays of fixed-size elements | the index of the element `r` refers to |
+| `.range_index(s) -> i64` | the same | the start of a wholly contained slice; checked when provenance does not prove it |
+| `.check_length(n) -> i64` | grow-only, grow-shrink, fixed-size elements | validates a count against the data-stack reservation; returns it without changing the array |
 
 Growth always supplies element values: there is no operation that exposes
 an uninitialized slot. Exceeding a limited array's capacity aborts; so does
 shrinking below empty. `index_of` needs a reference that the compiler can
 prove points into that very array
 ([section 12](#12-lifetimes-roots-stores-and-writability)).
+`range_index` accepts slices whose origin is only known at runtime: a nonempty
+slice must be element-aligned and wholly within the array's current length.
+An empty slice, including a default or foreign empty slice, returns zero.
+`check_length` rejects negative counts and counts whose elements alone would
+exceed a data-stack reservation, including oversized unsigned counts. It neither
+allocates storage nor promises that an append fits the array's remaining space.
+Both checks apply in every build.
 The `reusable` pool operations are in [section 14](#14-reusable-pools).
 Spec §3.3, §12.
 

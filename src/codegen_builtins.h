@@ -293,6 +293,39 @@ inline vector<string> CodeGen::EmitBuiltin(Call *c, Dst d0) {
             return { cat("(((uint8_t *)(", rx, ") - (uint8_t *)(", v.elems, ")) / ",
                          FixedSize(v.elem), ")") };
         }
+        case B_CHECK_LENGTH: {
+            auto lv = RecvLoc(an[0]);
+            return { SliceLen(an[1], ArrayView(lv).elem, ln, "GS_E_ARRAYLEN") };
+        }
+        case B_RANGE_INDEX: {
+            auto lv = RecvLoc(an[0]);
+            auto v = ArrayView(lv);
+            auto sv = GenPure(an[1]);
+            auto esz = FixedSize(v.elem);
+            auto i = T();
+            L("int64_t ", i, " = 0;");
+            if (!esz) {
+                L("if ((uint64_t)", sv, ".len > (uint64_t)(", v.len,
+                  ")) gs_abort(GS_E_ARRAYSLICE, ", LocArgs(ln), ");");
+            } else if (!c->poolcheck) {
+                L("if (", sv, ".len) ", i, " = ((uint8_t *)", sv,
+                  ".data - (uint8_t *)(", v.elems, ")) / ", esz, ";");
+            } else {
+                L("if (", sv, ".len) {");
+                ind++;
+                auto off = T();
+                L("uint64_t ", off, " = (uint64_t)((uintptr_t)", sv,
+                  ".data - (uintptr_t)(", v.elems, "));");
+                L("if (", off, " % ", esz, " || ", off, " / ", esz,
+                  " >= (uint64_t)(", v.len, ") || (uint64_t)", sv,
+                  ".len > (uint64_t)(", v.len, ") - ", off, " / ", esz,
+                  ") gs_abort(GS_E_ARRAYSLICE, ", LocArgs(ln), ");");
+                L(i, " = (int64_t)(", off, " / ", esz, ");");
+                ind--;
+                L("}");
+            }
+            return { i };
+        }
         case B_POP: {
             auto lv = RecvLoc(an[0]);
             auto v = ArrayView(lv);
@@ -876,12 +909,15 @@ inline string CodeGen::SpanArgs(const Loc &lv) {
 
 // A slice pool's length argument, evaluated once. A negative length, or one
 // no data stack could hold, aborts before anything changes.
-inline string CodeGen::SliceLen(Node *n, TypeExpr *elem, Line ln) {
+inline string CodeGen::SliceLen(Node *n, TypeExpr *elem, Line ln, const char *error) {
     auto nv = T();
     L("int64_t ", nv, " = (int64_t)(", GenX(n), ");");
     auto esz = FixedSize(elem);
-    L("if ((uint64_t)", nv, " > GS_STACK_RESERVE / ", esz, ") gs_abort(GS_E_SLICELEN, ",
-      LocArgs(ln), ");");
+    if (esz)
+        L("if ((uint64_t)", nv, " > GS_STACK_RESERVE / ", esz, ") gs_abort(", error, ", ",
+          LocArgs(ln), ");");
+    else
+        L("if (", nv, " < 0) gs_abort(", error, ", ", LocArgs(ln), ");");
     return nv;
 }
 

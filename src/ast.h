@@ -1114,7 +1114,7 @@ NODE(Call)
     // them, and checking the call again starts from it as written.
     int firstdefault = 0;
     int ndefaults = 0;
-    // free_slice/realloc_slice: the slice handed back is not provably the pool's,
+    // range_index/free_slice/realloc_slice: the slice is not provably the receiver's,
     // so codegen checks at run time that it lies inside the pool (§5.4).
     bool poolcheck = false;
     TypeExpr *qtype = nullptr;  // qlimit<T>: T, which names the queue (§11.2).

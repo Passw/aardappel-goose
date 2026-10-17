@@ -457,6 +457,21 @@ inline Val TypeCheck::CheckBuiltin(Call *c, const BuiltinDef &d, vector<Node *> 
                          ", got ", TypeStr(StorageType(av))));
         CheckRootedAtReceiver(c, d.name, rv, av, elem, "a reference", "§3.3");
     }
+    if (d.kind == B_RANGE_INDEX || d.kind == B_CHECK_LENGTH) {
+        if (ClassOf(elem) != SC_FIXED)
+            Error(c, cat(".", d.name, " needs fixed-size elements: ", TypeStr(rv.type),
+                         " is sequential (§3.3)"));
+        if (d.kind == B_RANGE_INDEX) {
+            auto sv = CheckV(args[1], nullptr);
+            args[1]->exprtype = sv.type;
+            if (sv.type->kind != TY_SLICE || !TypeEq(sv.type->sub, elem))
+                Error(c, cat(".range_index takes a slice of ", TypeStr(rv.type),
+                             ", got ", TypeStr(sv.type)));
+            // Empty slices from any storage (including default/null) yield
+            // zero. Other origins are checked at runtime unless proven here.
+            c->poolcheck = !RootedAtReceiver(rv, sv, elem);
+        }
+    }
     // A slice pool's operations (§5.4). A slice handed back must be one of
     // the pool's own, by the same exact root index_of needs, so that the
     // position it starts at is a whole index inside the length; the

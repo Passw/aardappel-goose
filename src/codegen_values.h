@@ -911,6 +911,7 @@ inline CodeGen::Loc CodeGen::FieldLocAt(Loc lv, int fieldidx) {
             r.t = ast.RefTo(ft, lv.t->line);
             r.val = true;
             r.s = cat(lv.s, ".", Sanitize(si->st->fields[fieldidx].name));
+            r.viaref = lv.viaref || ft->kind == TY_REF;
             DerefLoc(r);
             return r;
         }

@@ -18,9 +18,10 @@ memory stack tops where aliases prevent independent caches.
 Workers may construct local roots, but cannot reach a root global through direct
 access or calls. Unused root globals do not prevent worker compilation.
 
-The current checkpoint explicitly rejects construction of root fields
-containing references. This is an implementation guard, not an addition to the v1
-language contract below. Root literals must be immediate declaration initializers;
+Reference-containing fields now retain per-component store records, including
+writes through calls. Default formatting and custom format hooks inspect owners
+by reference. Remaining work covers the acceptance and performance audit below.
+Root literals must be immediate declaration initializers;
 `State { .. }` supplies field defaults. Root padding is rejected because the owner
 has no packed layout; put padding in an ordinary component struct instead.
 

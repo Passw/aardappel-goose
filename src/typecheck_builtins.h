@@ -761,9 +761,6 @@ inline TypeExpr *TypeCheck::OverloadedPart(Call *c, TypeExpr *t, vector<TypeExpr
 
 inline void TypeCheck::CheckRenderable(Call *c, const char *what, TypeExpr *t, Node *at,
                                        RenderSeen &seen, Val value, const Val &out) {
-    auto rendered = IsPlainRef(t) ? t->ref->sub : t;
-    if (ClassOf(rendered) == SC_ROOT)
-        Error(at, "root owner formatting is not implemented yet; format its fields separately");
     // A type met again on the path reaches itself through references. The
     // levels below render as this one does, from the struct, variant or ADT
     // a reference or slice leads to on by a function that runs no format
@@ -801,14 +798,15 @@ inline void TypeCheck::CheckRenderable(Call *c, const char *what, TypeExpr *t, N
     } popwalk { *this, walk };
     // A part lies in the value's storage, or where the value points: a slice
     // part's slot is the value, as writable as that is (UserFormatIn).
-    auto child = [&](TypeExpr *ft, bool throughref) {
+    auto child = [&](TypeExpr *ft, bool throughref, int component = -1) {
         auto v = value;
+        if (component >= 0) v.TakeAlts(ProjectRoots(value, t, component));
         v.hasslot = ft->kind == TY_SLICE;
-        if (v.hasslot) v.slot = value;
+        if (v.hasslot) v.slot = v;
         if (throughref) {
             ReadBack contents;
             auto hascontents = TempContents(value, contents);
-            v.TakeAlts(ReadBackRoot(ft, value, value.byteview, hascontents ? &contents : nullptr));
+            v.TakeAlts(ReadBackRoot(ft, v, value.byteview, hascontents ? &contents : nullptr));
             v.writable = SlotLoadWritable(ft, value.writable);
         }
         CheckRenderable(c, what, ft, at, seen, v, out);
@@ -819,6 +817,12 @@ inline void TypeCheck::CheckRenderable(Call *c, const char *what, TypeExpr *t, N
         case TY_SLICE: child(t->sub, IsRefOrSlice(t->sub)); return;
         case TY_REF: child(t->ref->sub, false); return;
         case TY_STRUCT: case TY_ENUM: case TY_VARIANT:
+            if (ClassOf(t) == SC_ROOT) {
+                auto si = GetStructInst(t);
+                for (size_t i = 0; i < si->ftypes.size(); i++)
+                    if (auto ft = si->ftypes[i]) child(ft, IsRefOrSlice(ft), (int)i);
+                return;
+            }
             // An overload rendering one part of a fixed-mode value may
             // overwrite it with another variant, and nothing may refer into
             // its payload meanwhile (§3.5): the parts lie in a copy codegen
@@ -1385,7 +1389,7 @@ inline void TypeCheck::GrowOnlyShrinkAt(Node *c, const string &op, VarDef *vd,
         if (!v->type || (v == vd && (bound || !RefsBesideTail(arrtype)))) return;
         PathsScope ps(*this, rebuilding && ExposedLater(v));
         auto t = v->type;
-        if (IsRefOrSlice(t)) {
+        if (IsRefOrSlice(t) && !v->componentowner) {
             // A recorded root is exact only while the variable keeps its
             // first binding: a `var` may since have been rebound to any
             // root at the same depth, and one not bound yet can still
@@ -1598,7 +1602,8 @@ inline void TypeCheck::RecordStore(VarDef *container, const Roots &roots, bool b
         DropKills(container);
         return;
     }
-    auto holds = container->type && !IsRefOrSlice(container->type);
+    auto holds = container->type &&
+                 (!IsRefOrSlice(container->type) || container->componentowner);
     container->contentbyteview |= byteview;
     if (roots.Unknown()) DropKills(container);
     if (holds && roots.Unknown()) container->contents.unknown = true;
@@ -1714,7 +1719,7 @@ inline void TypeCheck::ApplyCalleeStores(FnSpec *spec, vector<Val> &argvals, Nod
         e.slot = slot;
         e.sliceref = sliceref;
         container->contentbyteview |= byteview;
-        if (container->type && !IsRefOrSlice(container->type))
+        if (container->type && (!IsRefOrSlice(container->type) || container->componentowner))
             AddContents(container, a, classread, src);
         AddStoreEvent(e);
     };
@@ -2820,7 +2825,7 @@ inline void TypeCheck::NoteLiveViews(Node *at, const string &prefix, VarDef *roo
         PathsScope ps(*this, rebuilding && ExposedLater(v));
         auto t = v->type;
         vector<LiveView> vs;
-        if (IsRefOrSlice(t)) {
+        if (IsRefOrSlice(t) && !v->componentowner) {
             if (!v->refrootknown) return;
             vs = views(v->ref, t, false, v->isvar, false, v);
         } else if (growonly && HoldsPlainRef(t)) {

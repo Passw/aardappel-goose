@@ -842,7 +842,8 @@ inline void CodeGen::InitGlobalValue(VarDef *d, Node *init) {
             Ident id(c->line, c->name);
             id.vdef = c;
             id.exprtype = c->type;
-            auto ref = GenRefVal(&id, init->line);
+            auto ref = c->type->kind == TY_REF ? cat("&", VarLoc(c).s)
+                                              : GenRefVal(&id, init->line);
             L(gnames[d], ".", Sanitize(sl->sinst->st->fields[i].name), " = ", ref, ";");
         }
     } else if (IsResz(d->type)) {

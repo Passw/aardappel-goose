@@ -391,9 +391,6 @@ inline Val StructLit::Check(TypeCheck &tc, TypeExpr *expected) {
         if (st->isroot) {
             if (tc.rootinit != this || !tc.rootowner)
                 tc.Error(this, "a root owner must be constructed directly at its declaration");
-            for (auto ft : inst->ftypes)
-                if (ft && !tc.IsFlat(ft))
-                    tc.Error(this, "root fields containing references are not implemented yet");
             tc.rootowner->type = t;
             for (size_t i = 0; i < inst->ftypes.size(); i++)
                 if (inst->ftypes[i]) tc.RootComponent(tc.rootowner, t, (int)i);

@@ -3087,6 +3087,7 @@ inline TypeCheck::LitDeep TypeCheck::CheckInits(StructLit *sl, vector<Field> &fi
                           ? CheckDefaultInit(fi.val, ft, selft, sl, fields[sl->fieldindices[k]])
                           : CheckValue(fi.val, ft);
             NoteLitElem(deep, fi.val, fv, ft);
+            if (component && HoldsPlainRef(ft)) NoteHolderBinding(component, fv, fi.val);
         }
     }
     // Check every inverted pair, not just expressions whose numeric position
@@ -3297,6 +3298,9 @@ inline bool TypeCheck::ExposedLater(VarDef *v) {
 // everything else of this frame's body, for a `break` everything inside the
 // loop or `block` it ends, that loop's next iteration included.
 inline bool TypeCheck::UsedAfter(VarDef *v) {
+    // Components have no source identifier of their own. A later use of
+    // their owner conservatively keeps the component's stored views live.
+    if (v->componentowner && v->type) v = v->componentowner;
     set<SFunction *> seen;
     auto vframe = FrameOfScope(Depth(v) - 1);
     auto mentions = [&](Node *n, int fi) {

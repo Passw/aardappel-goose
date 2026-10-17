@@ -1479,7 +1479,7 @@ inline Roots TypeCheck::ReadBackRoot(TypeExpr *rt, const Roots &container, bool 
 // what was stored there for a reference or slice of this type: a view of
 // another type stored beside it.
 inline bool TypeCheck::ContentsReadBack(VarDef *h, TypeExpr *of, Roots &out) {
-    if (!h->type || IsRefOrSlice(h->type)) return false;
+    if (!h->type || (IsRefOrSlice(h->type) && !h->componentowner)) return false;
     Roots r;
     auto known = false;
     for (auto &a : h->contents.alts) {

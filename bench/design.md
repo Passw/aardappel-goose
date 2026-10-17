@@ -6,6 +6,10 @@ as well as workloads where Goose is likely to struggle. The aim is to
 measure both the benefits and the limitations and identify possible
 language improvements.
 
+The separate [slot_pool comparison](slot_pool.md) measures a root-struct
+stdlib allocator against the existing `reusable` builtin with identical
+allocation policies and workloads; run it with `bench/slot_pool.py`.
+
 The suite tests the effects of these features:
 
 * Compact inline data structures.

@@ -1,6 +1,7 @@
 # Root structs: library state with independent storage
 
-Status: root structs v1 implemented. Reusable-pool migration remains separate.
+Status: root structs v1 and an initial stdlib `slot_pool` are implemented.
+Replacing `reusable` remains a separate decision.
 Parsing, declaration validation and independent local/global components work,
 including field references passed to ordinary functions, per-component shrink checks,
 serialization and stack restoration. Direct field accesses retain the existing
@@ -353,7 +354,7 @@ array operator overloading merely to disguise a container's `items` field.
 
 ## Separate follow-up: reusable pools in the stdlib
 
-After root structs work as library state, evaluate:
+`import slot_pool;` now provides the initial copyable-element slot allocator:
 
 ```goose
 root struct slot_pool<T> {
@@ -366,9 +367,17 @@ let r .= pool.alloc_ref(42);
 pool.free(pool.items.index_of(r));
 ```
 
-This is proposed library usage, not a promise that root support alone makes all
-operations implementable. Slot pools require fixed-size elements. A slice pool
-has its items and a separate structure for free spans. Keep the actual current
+The implementation uses the same LIFO free-index policy as scalar `reusable`,
+with allocation, reference-returning allocation and checked free. Tests compare
+allocation traces, retained references and slot contents against the builtin.
+The [API reference](../stdlib.md#slot_pool) describes the supported element types
+and current boundaries; the [benchmark report](../../bench/slot_pool.md) compares
+equivalent native workloads. The compiler and existing reusable implementation
+are unchanged by this experiment.
+
+This does not yet make every reusable operation implementable in the library.
+Slot pools require fixed-size elements. A slice pool has its items and a separate
+structure for free spans. Keep the actual current
 algorithm as the migration baseline: `src/runtime/runtime_impl.h` uses an
 augmented B+ tree, not a linear freelist. Preserve first-fit placement,
 coalescing, tail reuse and overlap-safe relocation before comparing alternatives.
@@ -539,5 +548,6 @@ modules were not built. Linux/macOS and sanitizer CI were not run locally.
 The native performance results above cover a preserved call boundary and the
 existing array caches. They do not establish a performance guarantee for every
 aliasing pattern or a migration result for reusable pools. Implementation steps
-1–4 are complete; step 5 remains an independent follow-up, alongside the explicit
-v2 candidates.
+1–4 are complete. Step 5 now has a scalar slot-pool implementation, differential
+tests and repeatable benchmarks. The construction/path/slice extensions and
+worker compatibility still remain, alongside the explicit v2 candidates.

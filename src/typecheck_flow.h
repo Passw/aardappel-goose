@@ -230,6 +230,7 @@ inline bool TypeCheck::Viewable(TypeExpr *t) {
 inline bool TypeCheck::RefMayPointInto(VarDef *v, VarDef *root, bool growonly, TypeExpr *bound) {
     if (v->refrootknown) {
         for (auto &a : v->ref.alts) {
+            if (DifferentComponents(a.root, a.exact || a.projected, root, !bound)) continue;
             if (growonly && a.classread && !v->isvar) {
                 if (ClassReadMayPointInto(a.root, root, bound)) return true;
                 continue;
@@ -592,6 +593,7 @@ inline VarDef *TypeCheck::ResetLocal(VarDef *previous) {
 }
 
 inline VarDef *TypeCheck::RootComponent(VarDef *owner, TypeExpr *t, int field) {
+    t = ast.PlainOf(t); // Qualifiers change access, not storage identity.
     auto si = GetStructInst(t);
     assert(si->st->isroot && owner);
     VarDef *c = nullptr;
@@ -627,6 +629,17 @@ inline VarDef *TypeCheck::RootComponent(VarDef *owner, TypeExpr *t, int field) {
     c->isglobal = owner->isglobal;
     c->isvar = owner->isvar;
     c->assigned = c->maybeassigned = true;
+    // A recursive back edge can record a class use before the body first
+    // projects this field. Give the new projection those earlier uses too.
+    if (IsClassRoot(owner))
+        if (auto it = classuses.find(owner); it != classuses.end()) {
+            auto uses = it->second;
+            for (auto &u : uses) {
+                ClassUse projected;
+                projected.roots = ProjectRoots(u.roots, t, field);
+                NoteClassUse(c, projected);
+            }
+        }
     return c;
 }
 
@@ -637,22 +650,34 @@ inline Roots TypeCheck::ProjectRoots(const Roots &parents, TypeExpr *t, int fiel
         if (a.root && (IsClassRoot(a.root) ||
                       (a.root->type && TypeEq(ast.PlainOf(a.root->type), ast.PlainOf(t))))) {
             a.root = RootComponent(a.root, t, field);
+            a.projected = true;
+            a.slotread = a.classread = false;
             out.Add(a);
         } else {
             // A loaded owner reference may only have a lifetime bound. Enumerate
             // the owners it can reach; never invent an exact owner from that bound.
             auto candidates = RootCandidates(t, Depth(a.root), !a.root || a.root->isglobal,
                                              true, false);
+            Roots projected;
+            projected.unknown = candidates.unknown;
             for (auto b : candidates.alts) {
-                if (!b.root || b.root == a.root) continue;
+                // A body checked during global initialization must still allow
+                // for owners declared later, beside the already known ones.
+                if (!b.root) {
+                    if (!b.exact) projected.Add(b);
+                    continue;
+                }
+                if (b.root == a.root) continue;
                 if (IsClassRoot(b.root) || (b.root->type &&
                     TypeEq(ast.PlainOf(b.root->type), ast.PlainOf(t)))) {
                     b.root = RootComponent(b.root, t, field);
-                    b.slotread = a.slotread;
-                    out.Add(b);
+                    b.projected = true;
+                    b.slotread = b.classread = false;
+                    projected.Add(b);
                 }
             }
-            if (out.None()) out.Add({ a.root, false, a.from, a.slotread, a.classread });
+            if (projected.None()) projected.Add({ a.root, false, a.from, a.slotread, a.classread });
+            out.Add(projected);
         }
     }
     return out;
@@ -2709,7 +2734,7 @@ inline void TypeCheck::CheckBindingRoot(VarDef *d, const Val &v, Node *at) {
 // cycle of frame fi there (JoinCycle counts them) keeps that stack across
 // the call, as one in the local's scope does (§7.8).
 inline void TypeCheck::CheckCycleInit(VarDef *d, int fi, int calls) {
-    if (frames[fi].cyclecalls == calls || ClassOf(d->type) == SC_FIXED) return;
+    if (frames[fi].cyclecalls == calls || !NeedsCycleStack(d->type)) return;
     Error(frames[fi].cyclecall,
           cat(FrameFnName(fi), " calls into its recursive cycle while initializing "
               "non-fixed-size local ", d->name, ", which is built in place (§7.8)"));

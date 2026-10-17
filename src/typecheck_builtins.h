@@ -2150,6 +2150,8 @@ inline bool TypeCheck::GlobalReach::Class(VarDef *cr, bool exact, TypeExpr *poin
 // the store into x that leads to the array.
 inline bool TypeCheck::GlobalReach::Holds(VarDef *x, Line *where) {
     if (!x || !held.insert(x).second) return false;
+    if (x->type && tc.ClassOf(x->type) == SC_ROOT)
+        for (auto c : x->components) if (c && Holds(c, where)) return true;
     if (tc.IsClassRoot(x)) {
         auto it = tc.classuses.find(x);
         if (it == tc.classuses.end()) return false;
@@ -2217,6 +2219,16 @@ inline bool TypeCheck::HolderMayPointInto(VarDef *holder, VarDef *arr, TypeExpr 
                                           size_t from, Line *where, set<VarDef *> &seen,
                                           size_t *hitat, TypeExpr **via) {
     if (!seen.insert(holder).second) return false;
+    if (holder->type && ClassOf(holder->type) == SC_ROOT) {
+        for (auto c : holder->components) {
+            if (!c) continue;
+            auto start = from;
+            size_t since;
+            if (!pathslive && KilledFor(c, c, LoadType(c->type), arrtype, since))
+                start = std::max(start, since);
+            if (HolderMayPointInto(c, arr, arrtype, start, where, seen, hitat, via)) return true;
+        }
+    }
     // Whatever a store put there, or a view derived from it later, lies in a
     // slot of the holder's type.
     if (!pathslive && holder->type && !IsRefOrSlice(holder->type) &&
@@ -2440,7 +2452,8 @@ inline void TypeCheck::CheckShrinkHolders(Node *at, const string &op, VarDef *ro
         // can.
         auto into = ShrinkMayFree(root, bound, false, PointeeOf(v->type), v->ref.byteview) &&
                     (v->ref.Any([&](const RootAlt &a) {
-                         return !a.slotread && (a.root == root ||
+                         return !DifferentComponents(a.root, a.exact || a.projected, root, !bound) &&
+                                !a.slotread && (a.root == root ||
                                                 (!a.exact && Depth(a.root) >= Depth(root)));
                      }) ||
                      RefMayRetarget(v, root));
@@ -2795,7 +2808,8 @@ inline void TypeCheck::NoteLiveViews(Node *at, const string &prefix, VarDef *roo
         for (auto &a : w.p.alts) {
             if (!judges(w, a)) continue;
             LiveShrink ls { .shrunk = root, .shrunkexact = !bound, .bound = bound,
-                            .live = a.root, .liveexact = a.exact, .pointee = w.pointee,
+                            .live = a.root, .liveexact = a.exact, .liveprojected = a.projected,
+                            .pointee = w.pointee,
                             .byteview = w.p.byteview, .growonly = growonly, .name = name,
                             .contents = w.contents, .inplace = w.inplace };
             if (!NoteLiveShrink(ls, current))
@@ -2980,6 +2994,8 @@ template<typename F> void TypeCheck::EachHolderRoot(VarDef *holder, size_t from,
     set<VarDef *> seen;
     function<void(VarDef *, size_t)> walk = [&](VarDef *h, size_t start) {
         if (!seen.insert(h).second) return;
+        if (h->type && ClassOf(h->type) == SC_ROOT)
+            for (auto c : h->components) if (c) walk(c, start);
         for (auto i = start; i < storeevents.size(); i++) {
             auto e = storeevents[i];
             if (e.container != h || StoredLater(i)) continue;
@@ -3027,6 +3043,7 @@ inline bool TypeCheck::NoteLiveShrink(LiveShrink ls, FnSpec *current) {
         if (!current) return false;
         if (!outside(s)) return true;
     } else {
+        if (DifferentComponents(l, ls.liveexact || ls.liveprojected, s, ls.shrunkexact)) return true;
         // What a rendering walks in place goes with the storage it lies in,
         // a shrink of either kind relaying it out; its fixed-size parts, and
         // what they refer to, are judged as any view is.
@@ -3066,6 +3083,7 @@ inline bool TypeCheck::NoteLiveShrink(LiveShrink ls, FnSpec *current) {
         if (e.contents && !TypeEq(e.pointee, ls.pointee)) continue;
         e.shrunkexact = e.shrunkexact && ls.shrunkexact;
         e.liveexact = e.liveexact && ls.liveexact;
+        e.liveprojected = e.liveprojected && ls.liveprojected;
         if (e.pointee && (!ls.pointee || !TypeEq(e.pointee, ls.pointee))) e.pointee = nullptr;
         e.byteview = e.byteview || ls.byteview;
         return true;
@@ -3102,17 +3120,18 @@ inline void TypeCheck::ApplyCalleeLiveShrinks(Node *at, FnSpec *spec, vector<Val
     }
     // A class root of the callee, as seen from here: every place the
     // argument may point, or for a view every place its slot's slice may.
-    auto mapped = [&](VarDef *r, bool exact) -> Roots {
+    auto mapped = [&](VarDef *r, bool exact, bool projected = false) -> Roots {
         bool view = false;
         auto p = ClassParam(spec, r, view);
         if (p >= 0 && p < (int)args.size()) {
             auto base = view ? ViewClassOf(spec, p) : spec->params[p]->ref.Root();
             auto m = ProjectClass(r, base, view ? views[p] : args[p]);
-            if (!exact) m.Weaken();
+            if (!exact && !projected) m.Weaken();
             return m;
         }
         Roots one;
         one.Set(r, exact);
+        one.alts[0].projected = projected;
         return one;
     };
     // The storage a reference parameter's class stands for, where it is a
@@ -3134,7 +3153,7 @@ inline void TypeCheck::ApplyCalleeLiveShrinks(Node *at, FnSpec *spec, vector<Val
         auto orig = record->liveshrinks[k];
         auto livename = orig.name;
         auto shrunk = mapped(orig.shrunk, orig.shrunkexact);
-        auto live = mapped(orig.live, orig.liveexact);
+        auto live = mapped(orig.live, orig.liveexact, orig.liveprojected);
         auto shrunkat = orig.shrunkexact && !orig.bound ? storage(orig.shrunk) : nullptr;
         // What is still used is the argument passed for a parameter, itself:
         // one loaded out of a field, an element or a global points into no
@@ -3152,6 +3171,7 @@ inline void TypeCheck::ApplyCalleeLiveShrinks(Node *at, FnSpec *spec, vector<Val
                 if (!sa.exact && shrunkat) ls.bound = shrunkat;
                 ls.live = la.root;
                 ls.liveexact = la.exact;
+                ls.liveprojected = la.projected;
                 if (!ls.shrunk || !ls.live) continue;
                 // Passed on from the caller's parameter: that is what its
                 // callers see used.
@@ -3184,6 +3204,7 @@ inline void TypeCheck::ApplyCalleeLiveShrinks(Node *at, FnSpec *spec, vector<Val
                     x.contents = false;
                     x.live = ls.shrunk;
                     x.liveexact = false;
+                    x.liveprojected = false;
                     x.pointee = nullptr;
                     each.push_back(x);
                 } else {
@@ -3197,6 +3218,7 @@ inline void TypeCheck::ApplyCalleeLiveShrinks(Node *at, FnSpec *spec, vector<Val
                             auto x = ls;
                             x.live = b.root;
                             x.liveexact = b.exact;
+                            x.liveprojected = b.projected;
                             x.pointee = w.pointee;
                             x.byteview = w.p.byteview;
                             x.contents = w.contents;

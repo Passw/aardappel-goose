@@ -1388,7 +1388,18 @@ struct TypeCheck {
     Prov RefProvOf(VarDef *vd);
     VarDef *ResetLocal(VarDef *previous);
     VarDef *RootComponent(VarDef *owner, TypeExpr *t, int field);
+    // Root metadata has no packed value layout, but an owner whose fields
+    // are all fixed needs no dynamic storage across a recursive call.
+    bool NeedsCycleStack(TypeExpr *t) {
+        return ClassOf(t) == SC_ROOT
+                   ? AnyField(t, [&](TypeExpr *ft) { return ClassOf(ft) != SC_FIXED; })
+                   : ClassOf(t) != SC_FIXED;
+    }
     Roots ProjectRoots(const Roots &parents, TypeExpr *t, int field);
+    bool DifferentComponents(VarDef *a, bool within_a, VarDef *b, bool within_b) {
+        return within_a && within_b && a && b && a->componentbase && b->componentbase &&
+               a->componentfield != b->componentfield && TypeEq(a->componentbase, b->componentbase);
+    }
     bool ProjectedFrom(VarDef *root, VarDef *base) {
         for (auto r = root; r; r = r->componentowner) if (r == base) return true;
         return false;

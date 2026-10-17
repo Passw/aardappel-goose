@@ -109,7 +109,8 @@ inline StructInst *TypeCheck::GetStructInst(TypeExpr *t) {
             if (i + 1 < (int)st->fields.size())
                 Error(st->line, cat("resizable field ", st->fields[i].name, " of struct ",
                                     st->name, " must be the final field",
-                                    i == lastreal ? ", with no pad after it" : ""));
+                                    i == lastreal ? ", with no pad after it" : "",
+                                    "; use root struct for independently stored fields"));
             inst->sclass = SC_RESIZABLE;
         } else if (c == SC_VARIABLE && inst->sclass == SC_FIXED) {
             inst->sclass = SC_VARIABLE;
@@ -1401,7 +1402,7 @@ inline Roots TypeCheck::ReadBackRoot(TypeExpr *rt, const Roots &container, bool 
         // A self-relative reference points within its own root array by
         // construction (§3.9), so it inherits the container's root outright.
         if (relative) {
-            out.Add({ croot, c.exact });
+            out.Add({ croot, c.exact, nullptr, false, false, c.projected });
             continue;
         }
         if (!of || !croot || IsTemp(croot)) {
@@ -1424,6 +1425,16 @@ inline Roots TypeCheck::ReadBackRoot(TypeExpr *rt, const Roots &container, bool 
             if (c.exact && inplace && croot->type && !IsTemp(croot) && croot->ownerspec &&
                 OuterLocal(croot) && ContentsReadBack(croot, of, out))
                 continue;
+            // Following a stored owner reference leaves this component. Keep
+            // its source for stores, but bound the next owner by the enclosing
+            // class. Otherwise walking a cycle of owner references would grow
+            // an unbounded sequence of synthetic .next.next component paths.
+            if (ClassOf(of) == SC_ROOT && IsClassRoot(croot) && croot->componentowner) {
+                auto base = croot;
+                while (base->componentowner) base = base->componentowner;
+                out.Add({ base, false, from });
+                continue;
+            }
             out.Add({ croot, false, from, false, classread });
             continue;
         }

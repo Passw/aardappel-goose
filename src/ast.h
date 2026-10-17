@@ -507,6 +507,11 @@ struct RootAlt {
     // where every value has it, and a bound, a reference crossed and a back
     // edge's result drop it.
     bool classread = false;
+    // Within this root component's own storage, even when its owner is only
+    // lifetime-bounded (for example an owner loaded from a caller's holder).
+    // This excludes sibling fields without claiming one exact owner instance.
+    // Reading an ordinary reference out of the component loses this proof.
+    bool projected = false;
     bool operator==(const RootAlt &) const = default;
 };
 
@@ -538,7 +543,7 @@ struct Roots {
             return false;
         auto key = [how](RootAlt a) {
             if (how == Compare::Cycle) a.from = nullptr;
-            if (how == Compare::GlobalReach) a.slotread = a.classread = false;
+            if (how == Compare::GlobalReach) a.slotread = a.classread = a.projected = false;
             return a;
         };
         for (auto &a : alts)
@@ -580,6 +585,7 @@ struct Roots {
             b.exact = b.exact && a.exact;
             b.slotread = b.slotread && a.slotread;
             b.classread = b.classread && a.classread;
+            b.projected = b.projected && a.projected;
             if (b.from != a.from) b.from = nullptr;
             return b != before;
         }
@@ -598,6 +604,7 @@ struct Roots {
         for (auto &a : alts) {
             a.exact = false;
             a.classread = false;
+            a.projected = false;
         }
     }
     // Where a value was read out of (slotread, classread): nothing a
@@ -2070,6 +2077,7 @@ struct LiveShrink {
     TypeExpr *bound = nullptr;
     VarDef *live = nullptr;      // The root of what is still used.
     bool liveexact = true;
+    bool liveprojected = false;
     TypeExpr *pointee = nullptr; // What it points at; null: unknown.
     bool byteview = false;
     bool growonly = false;       // The shrink is §5.1's, else §5.2's.

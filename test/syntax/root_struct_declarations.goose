@@ -1,4 +1,4 @@
-// parse-only: root structs round-trip while semantic support is developed.
+// Root declarations round-trip; root remains an ordinary identifier elsewhere.
 namespace root_syntax;
 
 root struct State<T> {
@@ -23,3 +23,5 @@ struct Borrowed { state: StateRef }
 var state = State<i64> { .. };
 
 fn root(root: StateRef) -> i64 { root.root }
+
+fn ::main() { print(root_syntax::root(root_syntax::state)); }

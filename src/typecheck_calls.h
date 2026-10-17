@@ -2086,7 +2086,7 @@ inline void TypeCheck::JoinCycle(FnSpec *spec, Node *callnode) {
         auto end = i < last ? frames[i + 1].varbase : (int)vars.size();
         for (auto vi = frames[i].varbase; vi < end; vi++) {
             auto v = vars[vi];
-            if (!v->type || ClassOf(v->type) == SC_FIXED) continue;
+            if (!v->type || !NeedsCycleStack(v->type)) continue;
             if (v->isparam)
                 Error(frames[i].cyclecall,
                       cat(FrameFnName(i), " calls into its recursive cycle while by-value "
@@ -2116,7 +2116,7 @@ inline void TypeCheck::JoinCycle(FnSpec *spec, Node *callnode) {
 // block's arguments and body run (EmitFvCall), so the calls into the cycle
 // among them hold it unless it is in place.
 inline void TypeCheck::NoteTemp(Node *n, const Val &v, int cyclecalls) {
-    auto nonfixed = v.type && ClassOf(v.type) != SC_FIXED;
+    auto nonfixed = v.type && NeedsCycleStack(v.type);
     n->nftemp = nonfixed && !v.lvalue && !v.pointee;
     auto fi = (int)frames.size() - 1;
     if (frames[fi].cyclecalls == cyclecalls) return;
@@ -2872,7 +2872,8 @@ inline bool TypeCheck::SameRecord(const FnRecord &a, const FnRecord &b, const Fn
     for (size_t i = 0; i < a.liveshrinks.size(); i++) {
         auto &p = a.liveshrinks[i], &q = b.liveshrinks[i];
         if (p.shrunk != q.shrunk || p.shrunkexact != q.shrunkexact || p.live != q.live ||
-            p.liveexact != q.liveexact || p.byteview != q.byteview || p.growonly != q.growonly ||
+            p.liveexact != q.liveexact || p.liveprojected != q.liveprojected ||
+            p.byteview != q.byteview || p.growonly != q.growonly ||
             p.contents != q.contents || p.inplace != q.inplace || !sametype(p.bound, q.bound) ||
             !sametype(p.pointee, q.pointee))
             return why("live shrinks");
@@ -3012,7 +3013,8 @@ inline void TypeCheck::CheckSpecBodyOnce(FnSpec *spec, vector<Val> *argvals, Lin
                 // values; a slice or a reference to anything smaller may
                 // point at a cycle function's own storage.
                 if (pt->kind != TY_REF ||
-                    (ClassOf(pt->ref->sub) != SC_RESIZABLE && ClassOf(pt->ref->sub) != SC_ROOT) ||
+                    (ClassOf(pt->ref->sub) != SC_RESIZABLE &&
+                     !(ClassOf(pt->ref->sub) == SC_ROOT && NeedsCycleStack(pt->ref->sub))) ||
                     !ra.exact)
                     classroots[ra.cls]->poolclass = false;
                 if (!ra.exact) exactrefs[ra.cls] = false;
@@ -3411,6 +3413,7 @@ inline Val TypeCheck::RetAltVal(FnSpec *spec, const RootAlt &alt, vector<Val> &a
     // else (CallResult).
     m.Set(alt.root, alt.exact && (alt.root || !spec->inprogress), alt.from, alt.slotread);
     m.alts[0].classread = alt.classread;
+    m.alts[0].projected = alt.projected;
     m.writable = true;
     if (!alt.root || alt.root->isglobal || alt.root->ownerspec) return m;
     auto v = m;
@@ -3423,7 +3426,7 @@ inline Val TypeCheck::RetAltVal(FnSpec *spec, const RootAlt &alt, vector<Val> &a
         auto base = view ? ViewClassOf(spec, p) : spec->params[p]->ref.Root();
         auto ar = ProjectClass(alt.root, base,
                                view ? a.held.AsRoots() : ClassArgRoots(spec->argtypes[p], a));
-        x.TakeAlts(alt.exact ? ar : Bounds(ar));
+        x.TakeAlts(alt.exact || alt.projected ? ar : Bounds(ar));
         for (auto &xa : x.alts) xa.slotread = alt.slotread && xa.slotread;
         if (alt.classread)
             for (size_t k = 0; k < x.alts.size(); k++)

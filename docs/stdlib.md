@@ -6,6 +6,7 @@
 - [std](#std)
 - [exception](#exception)
 - [dictionary](#dictionary)
+- [slot_pool](#slot_pool)
 - [vec](#vec)
 - [math](#math)
 - [os](#os)
@@ -22,9 +23,9 @@
 
 </details>
 
-The standard library has sixteen modules under `stdlib/`: `std`,
-`dictionary`, `vec`, `math`, `os`, `ffi`, `binary`, `base64`, `csv`, `json`,
-`regex`, `audio`, `gfx`, `physics`, `ui`, and `exception`. Import each module by name,
+The standard library has seventeen modules under `stdlib/`: `std`,
+`dictionary`, `slot_pool`, `vec`, `math`, `os`, `ffi`, `binary`, `base64`, `csv`,
+`json`, `regex`, `audio`, `gfx`, `physics`, `ui`, and `exception`. Import each module by name,
 for example `import std;`. The compiler locates the library in its source
 tree; use `--stdlib <dir>` or `GOOSE_STDLIB` to select another location.
 Everything is written in Goose except the following parts, all reached
@@ -102,7 +103,7 @@ The library uses these conventions:
   `T` the reference type. `stable_sort` sorts an array of `in pool` links,
   but its temporary array cannot hold copies of self-relative links (spec
   §3.9).
-* The `std`, `dictionary`, `vec`, `math`, and `os` names are global;
+* The `std`, `dictionary`, `slot_pool`, `vec`, `math`, and `os` names are global;
   `ffi`, `binary`, `base64`, `csv`, `json`, `regex`, `audio`, `gfx`,
   `physics`, `ui` and `exception` use their own namespaces, and so do the
   helpers `std` and `json` read and write float text with, in `float_text`.
@@ -553,6 +554,65 @@ let c = owner.get(7);
 owner.insert(7, cells[4]);       // cells[3] is unchanged, and c still refers to it
 if c { c.v += 1; }
 ```
+
+## slot_pool
+
+`import slot_pool;` provides stable, reusable slots through ordinary root-struct
+fields and functions. It is available alongside the language's `reusable` arrays.
+
+```goose
+root struct slot_pool<T> {
+    items: T[>..] = [],
+    free_slots: i64[>..<] = []
+}
+
+fn alloc_index<T>(pool: slot_pool<T>&, value: T) -> i64
+fn alloc_ref<T>(pool: slot_pool<T>&, value: T) -> T&
+fn free<T>(pool: slot_pool<T>&, i: i64)
+```
+
+Declare a local or global owner and use `items` for ordinary indexing, slicing,
+iteration and `index_of`:
+
+```goose
+import slot_pool;
+
+fn main() {
+    var pool = slot_pool<i64> {};
+    let first .= pool.alloc_ref(10);
+    let index = pool.items.index_of(first);
+    pool.free(index);
+    assert(pool.alloc_index(20) == index);
+    print(first);                         // 20: the same slot, now reused
+}
+```
+
+Allocation requires a fixed-size, normally copyable `T`. No default value is
+needed: every allocation supplies a value. An allocation takes the most recently
+freed index, or appends when no slot is free. `alloc_index` returns its index;
+`alloc_ref` returns a reference to its value. For reference elements, `T&`
+collapses to `T` as usual; use `alloc_index` when the slot's identity is needed.
+Whole-element assignment replaces reference-valued elements without writing
+through them.
+
+`free` checks `0 <= i < items.len` in every build, then records the index. It
+leaves the element initialized and does not shrink the array. Existing references
+remain valid and can observe a later replacement. Double frees and use of a
+logically freed slot are application errors, as with `reusable`; the pool does
+not track occupancy or generations. `items.len` is the number of slots ever
+appended, including free ones, and iteration visits those slots too.
+
+Treat `free_slots` as bookkeeping. Do not shrink or replace `items`, or edit the
+freelist directly: doing so can invalidate the pool's logical state. Ordinary
+array bounds and lifetime checks still apply. There is no whole-pool reset API
+in this initial version; a new owner starts empty. An eligible `items` component
+can be serialized separately, but its image omits the freelist.
+
+This first version does not replace every use of `reusable`: self-relative
+values requiring construction at their destination cannot be passed through a
+value parameter, global index/pool-relative types cannot yet name `pool.items`,
+and a root owner cannot be copied to a worker. Worker-local pools are allowed.
+See [the migration plan](design/root_structs.md#separate-follow-up-reusable-pools-in-the-stdlib).
 
 ## vec
 

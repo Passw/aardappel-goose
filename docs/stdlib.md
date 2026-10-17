@@ -7,6 +7,7 @@
 - [exception](#exception)
 - [dictionary](#dictionary)
 - [slot_pool](#slot_pool)
+- [slice_pool](#slice_pool)
 - [vec](#vec)
 - [math](#math)
 - [os](#os)
@@ -23,9 +24,10 @@
 
 </details>
 
-The standard library has seventeen modules under `stdlib/`: `std`,
-`dictionary`, `slot_pool`, `vec`, `math`, `os`, `ffi`, `binary`, `base64`, `csv`,
-`json`, `regex`, `audio`, `gfx`, `physics`, `ui`, and `exception`. Import each module by name,
+The standard library has eighteen modules under `stdlib/`: `std`,
+`dictionary`, `slot_pool`, `slice_pool`, `vec`, `math`, `os`, `ffi`, `binary`,
+`base64`, `csv`, `json`, `regex`, `audio`, `gfx`, `physics`, `ui`, and `exception`.
+Import each module by name,
 for example `import std;`. The compiler locates the library in its source
 tree; use `--stdlib <dir>` or `GOOSE_STDLIB` to select another location.
 Everything is written in Goose except the following parts, all reached
@@ -613,6 +615,68 @@ values requiring construction at their destination cannot be passed through a
 value parameter, global index/pool-relative types cannot yet name `pool.items`,
 and a root owner cannot be copied to a worker. Worker-local pools are allowed.
 See [the migration plan](design/root_structs.md#separate-follow-up-reusable-pools-in-the-stdlib).
+
+## slice_pool
+
+`import slice_pool;` provides reusable contiguous runs of fixed-size, defaultable,
+normally copyable elements. An owner is declared as `var pool = slice_pool<T> {};`.
+
+```goose
+fn alloc_slice<T>(pool: slice_pool<T>&, n: i64) -> T[:]
+fn free_slice<T>(pool: slice_pool<T>&, s: T[:])
+fn realloc_slice<T>(pool: slice_pool<T>&, s: T[:], n: i64) -> T[:]
+```
+
+```goose
+import slice_pool;
+fn main() {
+    var pool = slice_pool<i64> {};
+    var entries = pool.alloc_slice(3);
+    entries[0] = 7;
+    entries = pool.realloc_slice(entries, 5);
+    print(entries);                         // [7, 0, 0, 0, 0]
+    pool.free_slice(entries);
+    let again = pool.alloc_slice(2);
+    print(again, " ", pool.items.len);       // [0, 0] 5
+}
+```
+
+Allocation selects the first free span in index order that fits. If none fits,
+it grows the backing array, using any free span at the tail first. Free spans
+coalesce with their neighbors. An augmented B+ tree of 512-byte nodes keeps
+first-fit search and neighbor lookup logarithmic in the number of spans; emptied
+nodes are reused. The policy matches `reusable[]`.
+
+`alloc_slice` defaults every element it hands out, including reused elements.
+`realloc_slice` preserves the first `min(s.len, n)` elements, returns a shortened
+tail to the tree, and defaults each added element once. Growth stays in place
+at the array's end or when the following free span suffices (including tail
+extension). Otherwise it frees the old run and selects the first fit, copying
+with overlap-safe ordering. Default expressions must not mutate or reenter the
+same pool. Every published backing-array element is initialized.
+
+`free_slice` and `realloc_slice` accept subranges of a pool run. They check that
+a nonempty slice is aligned and wholly within `items`, even when its origin is
+only known at runtime. Empty/default slices can be freed harmlessly; growing an
+empty slice allocates a new run. Negative or oversized counts abort in every
+build before the tree changes. `items.range_index(s)` recovers a nonempty run's
+index; it returns zero for every empty slice.
+
+Freeing and shrinking runs do not shrink `items` or invalidate old views. A
+retained view observes later replacements at its original address; relocation
+does not retarget it. Double frees, overlapping live allocations caused by
+invalid frees, and accessing a logically freed run are application errors.
+`items.len` is the high-water length, not the count of live elements. Treat
+`nodes` and `tree` as internal bookkeeping, and do not shrink or replace `items`.
+Ordinary bounds and lifetime checks still apply to these public fields.
+
+The owner follows the same placement, serialization and worker restrictions as
+`slot_pool`: serialize eligible `items` separately, and construct worker-local
+owners rather than transferring root owners. Self-relative elements and global
+index/pool-relative types naming a root component need the remaining migration
+features described in [the plan](design/root_structs.md#separate-follow-up-reusable-pools-in-the-stdlib).
+Plain references, optional references to separately owned storage, and declared
+field defaults are supported when `T` has a default and is normally copyable.
 
 ## vec
 

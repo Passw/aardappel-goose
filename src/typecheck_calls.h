@@ -1584,7 +1584,7 @@ inline FnSpec *TypeCheck::GetOrCreateSpec(MatchInfo &mi, vector<Val> &argvals, N
     for (size_t i = 0; i < roots.size(); i++)
         for (auto fi = (int)frames.size() - 1; argroots[i] && !classes[i].first && fi >= 0; fi--)
             for (size_t j = 0; frames[fi].spec && j < frames[fi].spec->params.size(); j++)
-                if (frames[fi].spec->params[j]->ref.Root() == argroots[i]) {
+                if (ProjectedFrom(argroots[i], frames[fi].spec->params[j]->ref.Root())) {
                     classes[i] = { frames[fi].spec, (int)j };
                     break;
                 }
@@ -1595,7 +1595,7 @@ inline FnSpec *TypeCheck::GetOrCreateSpec(MatchInfo &mi, vector<Val> &argvals, N
     auto fat = [&](size_t i) {
         auto pt = mi.paramtypes[i];
         return argroots[i] && pt->kind == TY_REF && pt->ref->lenstorage < 0 &&
-               ClassOf(pt->ref->sub) == SC_RESIZABLE;
+               (ClassOf(pt->ref->sub) == SC_RESIZABLE || ClassOf(pt->ref->sub) == SC_ROOT);
     };
     FnSpec *owner = nullptr;
     auto external = false;

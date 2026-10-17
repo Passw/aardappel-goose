@@ -273,10 +273,15 @@ inline void CodeGen::PlanTopClasses(FnSpec *sp) {
 //    to a function further out constructs into (`farreturn`), a stack this
 //    body cannot place (§7.9).
 inline bool CodeGen::RefTopsOk(FnSpec *sp, bool farreturn) {
-    // Descriptor projections can alias any fat parameter's stack. They need
-    // the shared memory top until descriptor components have canonical caches.
-    for (auto pt : sp->argtypes)
-        if (pt->kind == TY_REF && IsRoot(pt->ref->sub)) return false;
+    auto rootref = [&](TypeExpr *t) { return t->kind == TY_REF && IsRoot(t->ref->sub); };
+    auto hasroots = false, hasfat = false;
+    for (auto pt : sp->argtypes) {
+        hasroots |= rootref(pt);
+        hasfat |= IsFatRef(pt);
+    }
+    // A separately passed component can alias its owner parameter. Keep the
+    // shared top in that case; no runtime non-aliasing promise is introduced.
+    if (hasroots && hasfat) return false;
     for (auto fv : sinfo[sp].freevars)
         if (fv->type && (IsRoot(fv->type) ||
             (fv->type->kind == TY_REF && IsRoot(fv->type->ref->sub)))) return false;
@@ -285,12 +290,17 @@ inline bool CodeGen::RefTopsOk(FnSpec *sp, bool farreturn) {
     auto concrete = true;
     for (size_t i = 0; i < sp->params.size(); i++) {
         auto vd = sp->params[i];
-        if (!IsFatRef(sp->argtypes[i])) continue;
+        auto pt = sp->argtypes[i];
+        if (!IsFatRef(pt) && !rootref(pt)) continue;
+        if (rootref(pt) && vd->isvar) return false;
         if (!vd->refrootknown || !vd->ref.Root() || !vd->ref.Exact() ||
             !classes.insert(vd->ref.Root()).second)
             return false;
         fatparams.insert(vd);
-        pointees.push_back(sp->argtypes[i]->ref->sub);
+        if (rootref(pt)) {
+            for (auto ft : SI(pt->ref->sub)->ftypes)
+                if (ft && IsResz(ft)) pointees.push_back(ft);
+        } else pointees.push_back(pt->ref->sub);
         concrete &= i < sp->roots.size() && sp->roots[i].concrete;
     }
     if (fatparams.empty() || (fatparams.size() > 1 && !concrete)) return false;
@@ -317,7 +327,8 @@ inline bool CodeGen::RefTopsOk(FnSpec *sp, bool farreturn) {
     // binding names it.
     auto check = [&](const VarDef *v) {
         if (!v || !v->type) return;
-        if (IsFatRef(v->type) && !fatparams.count(v) && !refalias.count(v)) ok = false;
+        if ((IsFatRef(v->type) || rootref(v->type)) &&
+            !fatparams.count(v) && !refalias.count(v)) ok = false;
         if (v->isglobal && IsBytesT(v->type) && maybeparam(v->type)) ok = false;
         if (v->isglobal && IsRoot(v->type))
             for (auto c : v->components)
@@ -325,7 +336,7 @@ inline bool CodeGen::RefTopsOk(FnSpec *sp, bool farreturn) {
     };
     function<void(Node *)> walk = [&](Node *n) {
         if (!n || !ok) return;
-        if (n->exprtype && IsFatRef(n->exprtype)) {
+        if (n->exprtype && (IsFatRef(n->exprtype) || rootref(n->exprtype))) {
             // A reference taken of a variable is only handed on: to a call,
             // which syncs everything it is handed a stack in, or to an alias.
             auto id = Is<Ident>(n);
@@ -583,6 +594,16 @@ inline void CodeGen::EmitSpec(FnSpec *sp, bool er) {
     // The spellings are only known once SigParams has named the parameters.
     if (reftops) {
         for (size_t i = 0; i < sp->params.size(); i++) {
+            auto pt = sp->argtypes[i];
+            if (pt->kind == TY_REF && IsRoot(pt->ref->sub)) {
+                auto owner = VarLoc(sp->params[i]);
+                DerefLoc(owner);
+                auto si = SI(owner.t);
+                for (size_t f = 0; f < si->ftypes.size(); f++)
+                    if (si->ftypes[f] && IsResz(si->ftypes[f]))
+                        refstkexprs.insert(FieldLocAt(owner, (int)f).stk);
+                continue;
+            }
             if (!IsFatRef(sp->argtypes[i])) continue;
             auto pn = LocalName(sp->params[i]);
             refstkexprs.insert(cat(pn, ".stk"));

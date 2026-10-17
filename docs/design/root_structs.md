@@ -12,8 +12,10 @@ storage; direct projections resolve to the underlying local/global locations.
 Whole-owner references use a pointer to this descriptor. Parameter classes keep
 component paths in return and mutation summaries, including when a separate
 argument names the same component. Local aliases, stored/optional references,
-returned references and captures work. Descriptor accesses conservatively share
-memory stack tops where aliases prevent independent caches.
+returned references and captures work. Immutable owner parameters with distinct,
+exact storage cache component tops and lengths; descriptor accesses share memory
+tops where aliases prevent independent caches. Existing loop-view hoisting also
+handles root fields.
 
 Workers may construct local roots, but cannot reach a root global through direct
 access or calls. Unused root globals do not prevent worker compilation.
@@ -271,6 +273,36 @@ Two more ambitious optimizations are deferred:
 
 Keep the v1 language contract independent of either ABI strategy so that these
 can be introduced without changing user code.
+
+### Initial native measurement
+
+`python bench/root_structs.py --exe <goose.exe> --n 32000000 --reps 9`
+compares `push_ref.goose` with `push_root.goose`: the same RNG, item writes,
+retained references, checksums, and two owner instances. The harness marks both
+C `fill` helpers `GS_NOINLINE`, preserving the call boundary at Goose O0 and O2
+while compiling the C with native optimization. It saves timings, generated C,
+executable sizes, and stack reports. Times include process startup.
+
+Windows x64, 2026-10-16, median of nine runs after one warmup:
+
+| Native compiler | Goose level | Separate array arguments | Root argument |
+|---|---|---:|---:|
+| MSVC 19.51 | O0 | 88.14 ms | 88.88 ms |
+| clang-cl 22.1 | O0 | 85.57 ms | 85.64 ms |
+| MSVC 19.51 | O2 | 86.78 ms | 87.18 ms |
+| clang-cl 22.1 | O2 | 86.48 ms | 85.37 ms |
+
+Both use five data-stack regions (including rendering) and produce identical
+checksums and executable sizes per compiler: 148,480 bytes with MSVC and 155,648
+with clang-cl. The root version adds 536 bytes of generated standalone C. This
+probe shows no material regression for this workload; it is not a claim about
+all containers or platforms. Freelist-policy comparisons remain part of the
+separate reusable migration experiment.
+
+`root_owner_caches.goose` and the baseline runner also check generated C: top
+and length caches for both independent fields, base/length hoisting for indexed
+reads, and runtime correctness when owner/owner, owner/array, or owner/global
+arguments alias. Such aliases intentionally keep the shared memory top.
 
 ## Serialization, workers, and other boundaries
 

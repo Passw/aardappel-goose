@@ -3100,7 +3100,7 @@ struct TypeCheck {
                 auto found = false;
                 for (size_t i = 0; gc.spec && i < gc.spec->params.size() &&
                                    i < gc.spec->roots.size(); i++) {
-                    if (gc.spec->params[i]->ref.Root() != cr) continue;
+                    if (!ProjectedFrom(cr, gc.spec->params[i]->ref.Root())) continue;
                     if (!gc.spec->roots[i].concrete || !gc.spec->roots[i].exact) return false;
                     found = true;
                 }

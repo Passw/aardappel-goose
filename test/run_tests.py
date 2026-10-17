@@ -1748,6 +1748,34 @@ def main():
         else:
             r.ok(f"member parameters {f.name}")
     r.show_task(member_params)
+    # Root descriptors expose ordinary component metadata to top caching and
+    # loop-view hoisting, even when Goose leaves the helper out of line.
+    def root_owner_caches():
+        cfile = gendir / "root_owner_caches-shapes.c"
+        code, out, err = r.goose("-O0", "-o", cfile, HERE / "codegen" / "root_owner_caches.goose")
+        if code != 0:
+            r.fail("root owner caches", out + err)
+            return
+        text = cfile.read_text()
+        def body(name):
+            match = re.search(rf"^static [^\n;]*\b{name}_g\w*\([^\n]*\) \{{\n(.*?)^\}}\n",
+                              text, re.MULTILINE | re.DOTALL)
+            return match[1] if match else ""
+        grow, summation = body("grow"), body("sum")
+        prefix, _, loop = grow.partition("for (")
+        cached = all(re.search(rf"uint8_t \*\w+ = .*\.{f}_g\.stk->top;", prefix)
+                     and re.search(rf"int64_t \w+ = .*\.{f}_g\.hdr->len;", prefix)
+                     for f in ("first", "second"))
+        hoisted = all(s in summation.partition("for (")[0] for s in ("hdr->base", "hdr->len"))
+        # All header reads/writes in grow's loop use the caches, and sum's
+        # indexed load no longer goes through a descriptor or bounds check.
+        growth_body = loop.partition("\n    }")[0]
+        read_body = summation.partition("for (")[2].partition("\n    }")[0]
+        if not cached or not hoisted or "hdr->" in growth_body or "hdr->" in read_body:
+            r.fail("root owner caches", grow + summation)
+        else:
+            r.ok("root owner caches")
+    r.show_task(root_owner_caches)
     # Fields nothing can move are member stores, not stores through a
     # pointer taken first (StableDest).
     def member_stores():

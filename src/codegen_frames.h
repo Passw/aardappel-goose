@@ -577,6 +577,14 @@ inline bool CodeGen::LenRoot(const string &lenlv, string &root) {
         root = lenlv.substr(0, n - 5);
         return true;
     }
+    // An immutable root parameter's component has a stable descriptor slot.
+    // RefTopsOk has already ruled out another spelling of its stack.
+    auto member = lenlv.find(").");
+    if (lenlv.starts_with("(*") && member != string::npos && ends(".hdr->len") &&
+        ident(2, member) && ident(member + 2, n - 9)) {
+        root = lenlv.substr(0, n - 5);
+        return true;
+    }
     if (lenlv.compare(0, 7, "GS_GL->") == 0 && ends(".len") && ident(7, n - 4)) {
         root = lenlv.substr(0, n - 4);
         return true;

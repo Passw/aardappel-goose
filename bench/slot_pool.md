@@ -1,10 +1,12 @@
 # slot_pool versus reusable
 
-The initial `stdlib/slot_pool.goose` implementation uses the same LIFO free-index
+The `stdlib/slot_pool.goose` implementation uses the same LIFO free-index
 policy as scalar `reusable`: allocation pops a free index or appends an initialized
 element, and free records an in-range index without removing the element. This
-experiment keeps `reusable` and the compiler unchanged. It does not compare slice
-pools or alternative allocation policies.
+experiment keeps `reusable` and the library implementation unchanged. The compiler
+now forwards stable root-reference aliases so component top/length caches survive
+inlined library calls. It does not compare slice pools or alternative allocation
+policies.
 
 ## Reproducing the comparison
 
@@ -48,14 +50,20 @@ payload words, output and teardown are included. Checksums must agree across
 both implementations, both call policies, both Goose levels and every native
 compiler. Bounds checks and assertions remain enabled.
 
+`--reuse-api ref` replaces reuse allocations with `alloc_ref` followed by
+`items.index_of` in both implementations. This tests reference-return allocation
+under reuse as well as append. It is a separate workload, with the same slots,
+values and expected checksums; the original matrix defaults to `--reuse-api index`.
+
 ## Windows x64 measurements, 2026-10-17
 
 AMD Ryzen 9 9950X3D; MSVC 19.51.36260 and clang-cl 22.1.3, both using `/O2`.
 The command above uses 4,194,304 append allocations or 64,000,000 reuse
 allocations, split across the two owners. All 48 comparisons matched checksums.
-[The complete results](slot_pool_results.json) retain every measured sample,
-including the O0 cases, and the source fingerprints. The compiler's last source
-commit is `45b01053`; this experiment changes no compiler or reusable code.
+[The complete results after alias forwarding](slot_pool_alias_results.json) retain
+every measured sample, including O0, and the source fingerprints. The compiler's
+last source commit is `6320e9fc`. [The original measurements](slot_pool_results.json)
+used compiler source `45b01053`; both runs use the same library and workload.
 
 These are Goose **O2** results. Each time cell is **reusable / slot_pool**, in
 milliseconds. The ratio is `slot_pool / reusable`; above 1 means the library
@@ -63,28 +71,35 @@ took longer.
 
 | Workload | Item bytes | Calls | MSVC times | Ratio | clang times | Ratio |
 |---|---:|---|---:|---:|---:|---:|
-| append | 8 | inline | 21.66 / 22.14 | 1.022 | 20.80 / 21.05 | 1.012 |
-| append | 8 | boundary | 24.63 / 25.34 | 1.029 | 23.06 / 23.07 | 1.001 |
-| append | 128 | inline | 115.77 / 119.36 | 1.031 | 109.78 / 110.05 | 1.002 |
-| append | 128 | boundary | 106.03 / 112.21 | 1.058 | 112.22 / 114.04 | 1.016 |
-| lifo | 8 | inline | 75.87 / 85.21 | 1.123 | 65.38 / 69.59 | 1.064 |
-| lifo | 8 | boundary | 80.65 / 95.36 | 1.182 | 69.57 / 94.58 | 1.360 |
-| lifo | 128 | inline | 96.47 / 111.50 | 1.156 | 135.66 / 136.28 | 1.005 |
-| lifo | 128 | boundary | 107.35 / 159.22 | 1.483 | 157.83 / 210.80 | 1.336 |
-| scattered | 8 | inline | 81.81 / 88.15 | 1.077 | 75.27 / 75.84 | 1.008 |
-| scattered | 8 | boundary | 86.75 / 95.68 | 1.103 | 77.26 / 96.17 | 1.245 |
-| scattered | 128 | inline | 100.50 / 114.12 | 1.135 | 140.05 / 140.38 | 1.002 |
-| scattered | 128 | boundary | 109.25 / 143.65 | 1.315 | 155.78 / 210.49 | 1.351 |
+| append | 8 | inline | 22.84 / 23.59 | 1.033 | 20.26 / 20.53 | 1.013 |
+| append | 8 | boundary | 22.13 / 20.37 | 0.921 | 23.88 / 21.56 | 0.903 |
+| append | 128 | inline | 117.49 / 116.01 | 0.987 | 110.09 / 112.24 | 1.020 |
+| append | 128 | boundary | 106.63 / 114.32 | 1.072 | 112.75 / 111.01 | 0.985 |
+| lifo | 8 | inline | 74.27 / 80.29 | 1.081 | 65.08 / 58.88 | 0.905 |
+| lifo | 8 | boundary | 79.49 / 70.98 | 0.893 | 69.07 / 59.80 | 0.866 |
+| lifo | 128 | inline | 96.08 / 99.71 | 1.038 | 133.22 / 116.74 | 0.876 |
+| lifo | 128 | boundary | 104.98 / 105.45 | 1.005 | 154.72 / 133.24 | 0.861 |
+| scattered | 8 | inline | 80.56 / 86.29 | 1.071 | 74.15 / 65.03 | 0.877 |
+| scattered | 8 | boundary | 85.23 / 76.20 | 0.894 | 73.35 / 64.34 | 0.877 |
+| scattered | 128 | inline | 98.19 / 103.69 | 1.056 | 137.76 / 125.03 | 0.908 |
+| scattered | 128 | boundary | 107.97 / 107.36 | 0.994 | 152.38 / 135.82 | 0.891 |
 
-At O2, append is close in this whole-process measurement. Inline reuse ranges
-from near parity to about 16% longer; the preserved-boundary reuse cases take
-about 10–48% longer. O0 exposes larger differences, up to 2.70 times the builtin's
-elapsed time in this matrix, even with native C optimization. These are workload
-measurements, not a universal cost per allocation or a performance-parity claim.
+The large O2 call-boundary reuse gap is gone in this matrix. Previously these
+cases took about 10–48% longer; now they range from about 14% faster to 0.5%
+slower. MSVC's inline reuse cases still take about 4–8% longer, while clang's are
+about 9–12% faster. Append remains close, with a 7% regression in the MSVC
+128-byte boundary case. Small residual differences are acceptable for this
+experiment; allocation-only loops amplify costs that may be minor in application
+code. These results do not establish a universal cost per allocation.
+
+Goose **O0** still has substantial gaps, up to 2.68 times the builtin's elapsed
+time, even with native C optimization. Alias forwarding benefits the library
+helpers once Goose inlines them into the hot loop; it does not force that
+inlining at O0. This remains a limitation for unoptimized Goose builds.
 
 Both implementations report **five data-stack regions**: two per owner and one
 for rendering the checksum. This counts reservations, not peak committed memory
-or native-stack usage. The library adds 2,553–8,559 bytes of generated standalone
+or native-stack usage. The library adds 2,553–8,040 bytes of generated standalone
 C across the matrix. O2 executables are 512–2,048 bytes larger; sizes include
 runtime code and diagnostics, not just the allocation loops.
 
@@ -92,7 +107,29 @@ Some runs have scheduler/startup outliers, particularly in the short 8-byte
 append case. Treat single-digit percentage differences cautiously. An earlier
 shorter run had substantial variance in several later cases; the table uses the
 longer repeat with three warmups, and its full samples remain available above.
-The results support retaining `reusable` while improving the library path.
+The results support retaining `reusable` while evaluating wider library use.
+
+## Reference-return reuse
+
+The additional O2 matrix uses the same compiler, machine, workload sizes and
+sampling policy, with `--modes lifo scattered --levels 2 --reuse-api ref`.
+[All 16 comparisons](slot_pool_ref_results.json) matched the original workload's
+checksums. Ratios below are again `slot_pool / reusable`.
+
+| Workload | Item bytes | Calls | MSVC ratio | clang ratio |
+|---|---:|---|---:|---:|
+| lifo | 8 | inline | 0.942 | 0.864 |
+| lifo | 8 | boundary | 0.759 | 0.763 |
+| lifo | 128 | inline | 1.051 | 0.878 |
+| lifo | 128 | boundary | 0.929 | 0.847 |
+| scattered | 8 | inline | 0.934 | 0.856 |
+| scattered | 8 | boundary | 0.787 | 0.752 |
+| scattered | 128 | inline | 1.018 | 0.913 |
+| scattered | 128 | boundary | 0.947 | 0.876 |
+
+There is no large optimized gap in this matrix either. The library's existing
+`alloc_ref` implementation is retained rather than adding a separate allocation
+path to chase the remaining small differences.
 
 ## Findings from generated C
 
@@ -107,13 +144,19 @@ already has the element address. Its generic value parameter may introduce
 temporary element copies before native optimization. These differences are
 visible in generated C, but the timings alone do not isolate their costs.
 
-The standalone library allocator receives the existing component top/length
-caches. In the preserved exercise boundary, however, inlined library calls
-introduce owner-reference aliases and the generated loops still contain repeated
-descriptor/header accesses and memory-top updates. Native optimization can remove
-some of them. Better propagation of component identity through inlined aliases
-is a concrete compiler follow-up to investigate; scalarizing the root ABI is
-not a prerequisite for investigating it.
+Previously, inlined library calls introduced owner-reference aliases and disabled
+the preserved caller's component caches. Alias forwarding now gives those stable
+references one spelling. Generated reuse loops load their component tops and
+lengths before the loop and flush them afterward; real calls flush and reload
+the caches they can reach. Mutable references, references read from storage,
+potentially aliasing parameters and globals retain the conservative fallback.
+The root ABI is unchanged, and no singleton-owner assumption is made.
+
+Making `free_slots` private could protect the API invariant from callers, but
+privacy alone would not prove that every stored index is in range: module code
+could still insert a bad one. Eliminating the bounds check requires a compiler
+proof or a separately justified trusted implementation. The measured improvement
+needs neither change, and the public-freelist corruption tests still abort.
 
 This comparison is an initial scalar-pool result. Destination-aware construction
 for self-relative values, index types naming global components, worker snapshots
@@ -121,3 +164,17 @@ and slice pools remain separate work. The complete functional baseline also
 tests reference-valued and non-defaultable elements, aliases, global and worker-local
 owners, invalid frees, lifetime rejection, and deterministic differential traces
 against `reusable`.
+
+## Validation of alias forwarding
+
+The complete Windows baseline passed: 1,193 frontend checks, 565 native O0/O2
+program checks, 146 runtime-debug checks, 689 JIT runs and 1,894 expected type
+errors, plus root-domain and generated-C checks. The new root-alias regression
+covers alias chains, two owner arguments and an array argument naming the same
+storage, globals, sampling mutable receivers, and flushing/reloading caches at
+a real call. Its C-shape assertion checks that inlined helpers preserve an
+out-of-line caller's component caches. The assertion-enabled compiler also
+generated all 31 positive root/slot-pool fixtures at O0 and O2.
+
+Optional audio/gfx/physics/UI modules were not built; native worker tests ran,
+but TinyCC does not support them. Linux/macOS and sanitizer CI were not run here.

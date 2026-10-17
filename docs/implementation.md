@@ -5829,6 +5829,17 @@ An inlined `push_n` or heap operation on a local is therefore cached as a
 push on the local itself is. An alias has a view of its own where BCE named
 it in a loop, never its target's view.
 
+The same forwarding applies to immutable root references: an alias names an
+owner's existing descriptor or an immutable parameter/captured reference. This
+keeps each component's stack and header spelling stable when library helpers
+are inlined into an out-of-line caller. Root parameters still need distinct,
+exact root classes to cache their components; mixed owner/component parameters,
+possibly aliasing globals, mutable receivers and references read from storage
+retain the conservative fallback. Calls that receive a root synchronize the
+component caches. No singleton-owner assumption or non-aliasing ABI promise is
+made. An alias initialized from a rebindable reference must keep its sampled
+value and is not forwarded to that reference.
+
 **Counts.** A push bumps the count too. Where the header is reached through
 memory (a reference parameter's `p.hdr->len`, a global's, a captured
 array's), a byte store may alias the count as it may alias the top. So

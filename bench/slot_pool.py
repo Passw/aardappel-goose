@@ -25,7 +25,7 @@ import toolchain as tc
 MODES = {"append": 0, "lifo": 1, "scattered": 2}
 
 
-def source_for(template, backend, n, live, width, mode, calls):
+def source_for(template, backend, n, live, width, mode, calls, reuse_api="index"):
     for name, value in dict(N=n, LIVE=live, WIDTH=width, MODE=mode).items():
         template, count = re.subn(rf"(?m)^(let {name} = )\d+",
                                   lambda m: m[1] + str(value), template)
@@ -33,6 +33,12 @@ def source_for(template, backend, n, live, width, mode, calls):
             raise RuntimeError(f"Missing benchmark constant {name}")
     if calls == "inline":
         template = template.replace("fn exercise(", "inline fn exercise(")
+    if reuse_api == "ref":
+        old = "let index = p.alloc_index(Item { [(seed + i as u64) as i64; WIDTH] });"
+        new = "let index = p.items.index_of(p.alloc_ref(Item { [(seed + i as u64) as i64; WIDTH] }));"
+        if template.count(old) != 1:
+            raise RuntimeError("Reference reuse conversion no longer matches allocation")
+        template = template.replace(old, new)
     if backend == "reusable":
         replacements = {
             "import slot_pool;\n": "",
@@ -94,6 +100,8 @@ def main():
     ap.add_argument("--widths", nargs="+", type=int, choices=(1, 16), default=[1, 16])
     ap.add_argument("--levels", nargs="+", type=int, choices=(0, 2), default=[0, 2])
     ap.add_argument("--calls", nargs="+", choices=("inline", "boundary"), default=["inline", "boundary"])
+    ap.add_argument("--reuse-api", choices=("index", "ref"), default="index",
+                    help="reuse through alloc_index or alloc_ref plus index_of; append always uses alloc_ref")
     ap.add_argument("--out", type=Path, default=ROOT / "build" / "slot-pool-bench")
     args = ap.parse_args()
     if args.n <= 0 or args.grow_n <= 0 or args.n % 256 or args.grow_n % 256:
@@ -111,6 +119,7 @@ def main():
     results, checksums = [], {}
     metadata = dict(platform=platform.platform(), n=args.n, grow_n=args.grow_n,
                     live=args.live, reps=args.reps, warmups=args.warmups, executable=str(exe),
+                    reuse_api=args.reuse_api,
                     slot_pool_sha256=hashlib.sha256((ROOT / "stdlib/slot_pool.goose").read_bytes()).hexdigest(),
                     workload_sha256=hashlib.sha256(template.encode("utf-8")).hexdigest(), runs=results)
     for mode in args.modes:
@@ -122,7 +131,8 @@ def main():
                     generated = {}
                     for backend in ("reusable", "slot_pool"):
                         path = out / f"{case}-{backend}.goose"
-                        source = source_for(template, backend, n, args.live, width, MODES[mode], calls)
+                        source = source_for(template, backend, n, args.live, width, MODES[mode], calls,
+                                            args.reuse_api)
                         generated[backend] = generate(exe, path, source, level, calls)
                     for compiler in compilers.values():
                         binaries, timings, metrics = {}, {}, {}

@@ -12,7 +12,8 @@ root struct slice_pool<T> {
     nodes: slice_pool_node[>..] = [],
     tree: slice_pool_tree = slice_pool_tree { .. }
 }
-struct slice_pool_path { h: i64, node: i64[24], pos: i64[24] }
+// Entry positions are -1..30; node indices retain the array's full index width.
+struct slice_pool_path { h: i64, node: i64[24], pos: i8[24] }
 struct slice_pool_near { k: i64, next_node: i64, next_pos: i64, other_path: bool }
 
 fn slice_pool_newnode<T>(p: slice_pool<T>&) -> i64 {
@@ -58,7 +59,7 @@ fn slice_pool_find<T>(p: slice_pool<T>&, path: slice_pool_path&, idx: i64) -> i6
         var k = 1;
         while k < node.n && node.data[k] <= idx { k++; }
         path.node[l] = i;
-        path.pos[l] = k - 1;
+        path.pos[l] = (k - 1) as i8;
         i = node.data[40 + k - 1];
     }
     path.node[path.h] = i;
@@ -69,7 +70,7 @@ fn slice_pool_find<T>(p: slice_pool<T>&, path: slice_pool_path&, idx: i64) -> i6
         let mid = (lo + hi) / 2;
         if leaf.data[mid] <= idx { lo = mid + 1; } else { hi = mid; }
     }
-    path.pos[path.h] = lo - 1;
+    path.pos[path.h] = (lo - 1) as i8;
     return lo - 1;
 }
 fn slice_pool_nextleaf<T>(p: slice_pool<T>&, path: slice_pool_path&) -> bool {
@@ -225,7 +226,7 @@ fn slice_pool_place<T>(p: slice_pool<T>&, cnt: i64) -> i64 {
         var k = node.n - 1;
         if fit { k = 0; while node.data[20 + k] < cnt { k++; } }
         path.node[l] = i;
-        path.pos[l] = k;
+        path.pos[l] = k as i8;
         i = node.data[40 + k];
     }
     path.node[path.h] = i;

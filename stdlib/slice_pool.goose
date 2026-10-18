@@ -1,6 +1,6 @@
 // First-fit runs with coalescing and stable backing storage. Freeing marks a
 // run reusable; existing views remain valid and can observe replacement values.
-// Elements must be fixed-size, defaultable and normally copyable.
+// Elements must be fixed-size and defaultable; resizing also requires copying.
 // Treat nodes/tree as bookkeeping and do not shrink or replace items directly.
 
 // A 512-byte B+ node: leaves use 31 keys and 31 counts; inner nodes use
@@ -31,7 +31,8 @@ fn slice_pool_max(node: slice_pool_node&, leaf: bool) -> i64 {
     let offset = if leaf { 31 } else { 20 };
     assert(n >= 0 && n <= offset);
     var m = 0;
-    for k in n { if node.data[offset + k] > m { m = node.data[offset + k]; } }
+    let counts = node.data[offset..offset + n];
+    for count in counts { if count > m { m = count; } }
     return m;
 }
 fn slice_pool_fix<T>(p: slice_pool<T>&, path: slice_pool_path&, from: i64) {
@@ -304,6 +305,22 @@ fn slice_pool_regrow<T>(p: slice_pool<T>&, idx: i64, old: i64, cnt: i64) -> i64 
     return slice_pool_place(p, cnt);
 }
 
+inline fn slice_pool_defaults<T>(p: slice_pool<T>&, first: i64, end: i64) {
+    let used_end = if end < p.items.len { end } else { p.items.len };
+    let reused = p.items[first..used_end];
+    for i in reused.len { reused[i] .= default<T>(); }
+    for i in p.items.len..end { p.items.push(default<T>()); }
+}
+inline fn slice_pool_move<T>(dst: T[:], src: T[:], backward: bool) {
+    assert(dst.len == src.len);
+    if backward {
+        var j = dst.len;
+        while j > 0 { j--; dst[j] .= src[j]; }
+    } else {
+        for j in dst.len { dst[j] .= src[j]; }
+    }
+}
+
 // Copy before defaulting, with memmove ordering even when a freed prefix lets
 // the new run overlap the old one. New array elements are always initialized.
 fn slice_pool_finish<T>(p: slice_pool<T>&, idx: i64, n: i64, old_idx: i64, old: T[:]) -> T[:] {
@@ -315,25 +332,20 @@ fn slice_pool_finish<T>(p: slice_pool<T>&, idx: i64, n: i64, old_idx: i64, old: 
         if existing > available { existing = available; }
         // The destination tail is past all source elements, so it can be
         // appended before moving the overlapping existing prefix backward.
-        var j = existing;
-        while j < old.len { p.items.push(old[j]); j++; }
-        if idx > old_idx {
-            j = existing;
-            while j > 0 { j--; p.items[idx + j] .= old[j]; }
-        } else {
-            for k in existing { p.items[idx + k] .= old[k]; }
-        }
+        p.items.append(old[existing..]);
+        slice_pool_move(p.items[idx..idx + existing], old[..existing], idx > old_idx);
     }
-    var j = idx + old.len;
-    while j < end && j < p.items.len { p.items[j] .= default<T>(); j++; }
-    while j < end { p.items.push(default<T>()); j++; }
+    slice_pool_defaults(p, idx + old.len, end);
     return p.items[idx..end];
 }
 
-fn alloc_slice<T>(p: slice_pool<T>&, n: i64) -> T[:] {
+inline fn alloc_slice<T>(p: slice_pool<T>&, n: i64) -> T[:] {
     let count = p.items.check_length(n);
-    let idx = slice_pool_place(p, count);
-    return slice_pool_finish(p, idx, count, 0, default<T[:]>());
+    let idx = if count == 0 || p.nodes.len == 0 { p.items.len } else { slice_pool_place(p, count) };
+    if idx < 0 || idx > p.items.len { abort("slice_pool: invalid free span"); }
+    let end = p.items.check_length(idx + count);
+    slice_pool_defaults(p, idx, end);
+    return p.items[idx..end];
 }
 fn free_slice<T>(p: slice_pool<T>&, s: T[:]) {
     let idx = p.items.range_index(s);

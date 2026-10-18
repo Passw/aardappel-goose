@@ -618,8 +618,8 @@ See [the migration plan](design/root_structs.md#separate-follow-up-reusable-pool
 
 ## slice_pool
 
-`import slice_pool;` provides reusable contiguous runs of fixed-size, defaultable,
-normally copyable elements. An owner is declared as `var pool = slice_pool<T> {};`.
+`import slice_pool;` provides reusable contiguous runs of fixed-size, defaultable
+elements. An owner is declared as `var pool = slice_pool<T> {};`.
 
 ```goose
 fn alloc_slice<T>(pool: slice_pool<T>&, n: i64) -> T[:]
@@ -672,11 +672,13 @@ Ordinary bounds and lifetime checks still apply to these public fields.
 
 The owner follows the same placement, serialization and worker restrictions as
 `slot_pool`: serialize eligible `items` separately, and construct worker-local
-owners rather than transferring root owners. Self-relative elements and global
-index/pool-relative types naming a root component need the remaining migration
-features described in [the plan](design/root_structs.md#separate-follow-up-reusable-pools-in-the-stdlib).
-Plain references, optional references to separately owned storage, and declared
-field defaults are supported when `T` has a default and is normally copyable.
+owners rather than transferring root owners. `alloc_slice` constructs defaults
+in place, so allocation and free support defaultable self-relative elements;
+`realloc_slice` requires normally copyable elements, just as the builtin does.
+Global index/pool-relative types naming a root component need the remaining
+migration features described in [the plan](design/root_structs.md#separate-follow-up-reusable-pools-in-the-stdlib).
+Optional references to separately owned storage and declared field defaults are
+supported when `T` has a default.
 
 ## vec
 

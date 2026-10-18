@@ -5,6 +5,12 @@ A Goose implementation of the 50 benchmarks of
 directory of that repository, plus the tools to run it here against
 LangArena's own Rust and C++ implementations.
 
+Matmul and Game of Life use the stdlib `slice_pool`. Graph and Maze retain the
+deprecated `reusable[]`: the library adds about 10% to graph preparation and
+about 2 ms to maze construction in the local comparison. See the
+[paired pool measurements](../pool_workloads.md), which include work outside
+LangArena's reported timing window.
+
 ## Layout
 
 | here | in a LangArena checkout |

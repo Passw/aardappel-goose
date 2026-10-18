@@ -1,5 +1,11 @@
 # Goose samples
 
+> **Deprecated language features:** `reusable` and `reusable[]`. Use
+> [`slot_pool<T>`](../docs/stdlib.md#slot_pool) for slots and
+> [`slice_pool<T>`](../docs/stdlib.md#slice_pool) for contiguous runs.
+> Builtin behavior and historical examples below remain relevant to existing
+> code; removal is planned separately, after the remaining migration gaps.
+
 If you have not written Goose before, read [`docs/tutorial.md`](../docs/tutorial.md)
 first: it introduces the language by example and says which of these to read
 when. [`docs/reference.md`](../docs/reference.md) then covers the whole

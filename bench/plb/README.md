@@ -1,5 +1,11 @@
 # Programming-Language-Benchmarks in Goose
 
+> **Deprecated language features:** `reusable` and `reusable[]`. Use
+> [`slot_pool<T>`](../../docs/stdlib.md#slot_pool) for slots and
+> [`slice_pool<T>`](../../docs/stdlib.md#slice_pool) for contiguous runs.
+> Builtin behavior and historical examples below remain relevant to existing
+> code; removal is planned separately, after the remaining migration gaps.
+
 Goose programs for the problems of
 [Programming-Language-Benchmarks](https://github.com/hanabi1224/Programming-Language-Benchmarks)
 (PLB), one directory per problem, named as PLB names its sources: `1.goose`

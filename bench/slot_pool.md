@@ -1,5 +1,11 @@
 # slot_pool versus reusable
 
+> **Deprecated language features:** `reusable` and `reusable[]`. Use
+> [`slot_pool<T>`](../docs/stdlib.md#slot_pool) for slots and
+> [`slice_pool<T>`](../docs/stdlib.md#slice_pool) for contiguous runs.
+> Builtin behavior and historical examples below remain relevant to existing
+> code; removal is planned separately, after the remaining migration gaps.
+
 The `stdlib/slot_pool.goose` implementation uses the same LIFO free-index
 policy as scalar `reusable`: allocation pops a free index or appends an initialized
 element, and free records an in-range index without removing the element. This

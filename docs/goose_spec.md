@@ -1864,6 +1864,12 @@ created).
 
 ### 5.4 `reusable` arrays (safe allocation escape hatch)
 
+**Deprecated:** use the standard library's [`slot_pool<T>`](stdlib.md#slot_pool)
+for slots and [`slice_pool<T>`](stdlib.md#slice_pool) for contiguous runs.
+The builtin syntax and behavior described here remain supported for existing
+code and the [remaining migration gaps](design/root_structs.md#separate-follow-up-reusable-pools-in-the-stdlib).
+Removal is a separate future step; no deprecation diagnostic is emitted yet.
+
 A grow-only resizable local of fixed-size elements may be declared
 `reusable` (the keyword prefixes the declaration:
 `reusable var pool: Slot[>..] = [];`, also valid on globals). The compiler
@@ -4485,8 +4491,8 @@ And the array members, ordinary functions of their receiver per UFCS
 | `.index_of(r) -> i64` | fixed, limited, grow-only, grow-shrink | the index of the element `r` refers to (§3.3) |
 | `.range_index(s) -> i64` | the same, fixed-size elements | checked start of a contained slice; zero for empty (§3.3) |
 | `.check_length(n) -> i64` | grow-only, grow-shrink, fixed-size elements | validate a count without allocating (§3.3) |
-| `.alloc_index(v) -> i64`, `.alloc_ref(v) -> T&`, `.free(i)` | `reusable` pools | slot reuse (§5.4) |
-| `.alloc_slice(n) -> T[:]`, `.realloc_slice(s, n) -> T[:]`, `.free_slice(s)` | `reusable[]` pools | slice reuse (§5.4) |
+| `.alloc_index(v) -> i64`, `.alloc_ref(v) -> T&`, `.free(i)` | deprecated `reusable` pools | slot reuse (§5.4); prefer stdlib `slot_pool<T>` |
+| `.alloc_slice(n) -> T[:]`, `.realloc_slice(s, n) -> T[:]`, `.free_slice(s)` | deprecated `reusable[]` pools | slice reuse (§5.4); prefer stdlib `slice_pool<T>` |
 
 For serialization, the byte-count prefix must account for exactly the
 remaining input. Validation establishes complete elements, representable

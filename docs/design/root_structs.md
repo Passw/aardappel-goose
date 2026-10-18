@@ -1,7 +1,9 @@
 # Root structs: library state with independent storage
 
-Status: root structs v1 and an initial stdlib `slot_pool` are implemented.
-Replacing `reusable` remains a separate decision.
+Status: root structs v1, stdlib `slot_pool` and stdlib `slice_pool` are implemented.
+**`reusable` and `reusable[]` are deprecated** in favor of
+[`slot_pool<T>`](../stdlib.md#slot_pool) and [`slice_pool<T>`](../stdlib.md#slice_pool).
+The builtins remain available; removal waits for the remaining migration work.
 Parsing, declaration validation and independent local/global components work,
 including field references passed to ordinary functions, per-component shrink checks,
 serialization and stack restoration. Direct field accesses retain the existing
@@ -30,8 +32,8 @@ Root literals must be immediate declaration initializers;
 has no packed layout; put padding in an ordinary component struct instead.
 
 The following records the v1 contract and the separately identified follow-ups.
-Evaluating a stdlib replacement for `reusable` and `reusable[]` is a separate
-milestone; existing reusable syntax and runtime behavior remain unchanged.
+The library pools have differential tests and native benchmarks. Existing
+reusable syntax and runtime behavior remain unchanged during deprecation.
 
 ## Motivation
 
@@ -375,12 +377,13 @@ and current boundaries; the [benchmark report](../../bench/slot_pool.md) compare
 equivalent native workloads. The compiler and existing reusable implementation
 are unchanged by this experiment.
 
-This does not yet make every reusable operation implementable in the library.
-Slot pools require fixed-size elements. A slice pool has its items and a separate
-structure for free spans. Keep the actual current
-algorithm as the migration baseline: `src/runtime/runtime_impl.h` uses an
-augmented B+ tree, not a linear freelist. Preserve first-fit placement,
-coalescing, tail reuse and overlap-safe relocation before comparing alternatives.
+`stdlib/slice_pool.goose` packages its `items`, node array and tree state in one
+root owner. It implements the same augmented B+ tree as the builtin: first-fit
+placement, coalescing, tail reuse and overlap-safe relocation. Differential tests
+compare positions, retained views and every backing element under allocation,
+free and resize traces. See its [API](../stdlib.md#slice_pool) and
+[benchmark report](../../bench/slice_pool.md). Both pool types require fixed-size
+elements; not every builtin use can migrate yet.
 
 Preserve the existing safety contract: all published elements remain valid
 typed values, a free merely marks storage reusable, and a stale reference may
@@ -436,20 +439,26 @@ not a new pool-specific privilege.
 
 ### Checked slice position
 
-Current `free_slice`/`realloc_slice` can check alignment and complete containment
+Builtin `free_slice`/`realloc_slice` can check alignment and complete containment
 at runtime when provenance cannot prove their input slice belongs to the pool.
 `index_of` currently requires stronger static provenance. Expose a general
-checked slice-to-array position operation (working name `range_index`): elide
-checks when proven, reject known foreign storage, otherwise check alignment and
-the full range. Specify empty-slice behavior explicitly. No library pointer
-arithmetic or unchecked index fabrication is needed.
+checked slice-to-array position operation, now implemented as `range_index`:
+elide checks when proven, otherwise check alignment and the full range at runtime.
+Every empty slice, including a foreign or default slice, returns zero. Nonempty
+foreign storage aborts. No library pointer arithmetic or unchecked index
+fabrication is needed.
 
 Preserve all-build checks for invalid frees, negative/overflowing allocation
 lengths and element bounds, with validation before metadata changes where the
 current contract requires it. Slice allocations initialize every added element;
 relocating slices retain the restriction on self-relative element types. Expose
 any needed length validation as a general array capability rather than copying
-runtime constants into the library.
+runtime constants into the library. This is implemented as `check_length`, which
+validates a proposed total element count without changing storage or promising
+that a later allocation will succeed. `slice_pool` validates requested counts and
+input slices before changing tree metadata. Allocation and free support
+defaultable self-relative elements; resize still requires copying, as it does
+for the builtin.
 
 ### Policy and compatibility
 
@@ -459,10 +468,13 @@ are an optional API and cannot protect escaped raw references. See
 [slotmap's versioned keys](https://docs.rs/slotmap/latest/slotmap/) for a useful
 comparison, not a replacement for Goose's existing reuse semantics.
 
-Retain `reusable` and `reusable[]` while measuring and checking the alternative.
-Only decide on deprecation/removal after construction, relative/index types,
-reference behavior, worker compatibility, diagnostics and performance have a
-reviewed migration path. Root structs can ship independently of that decision.
+Deprecate `reusable` and `reusable[]` in documentation and recommend the library
+types for new code. Keep the syntax, diagnostics and runtime behavior available
+for existing code. Removal is a later change, after destination-aware slot
+construction, global component index/relative types and worker transfer have a
+reviewed migration path. Worker-local library pools already work. Continue
+measuring application workloads as well as allocation-heavy microbenchmarks;
+small regressions alone do not require retaining a language-level allocator.
 
 ## V2 candidates
 
@@ -548,6 +560,7 @@ modules were not built. Linux/macOS and sanitizer CI were not run locally.
 The native performance results above cover a preserved call boundary and the
 existing array caches. They do not establish a performance guarantee for every
 aliasing pattern or a migration result for reusable pools. Implementation steps
-1–4 are complete. Step 5 now has a scalar slot-pool implementation, differential
-tests and repeatable benchmarks. The construction/path/slice extensions and
-worker compatibility still remain, alongside the explicit v2 candidates.
+1–4 are complete. Step 5 now has both pool implementations, differential tests
+and repeatable benchmarks. Checked slice positions and length validation are
+implemented. Destination-aware slot construction, global component paths and
+worker transfer remain, alongside the explicit v2 candidates.

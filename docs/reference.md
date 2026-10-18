@@ -920,7 +920,8 @@ An empty slice, including a default or foreign empty slice, returns zero.
 exceed a data-stack reservation, including oversized unsigned counts. It neither
 allocates storage nor promises that an append fits the array's remaining space.
 Both checks apply in every build.
-The `reusable` pool operations are in [section 14](#14-reusable-pools).
+The standard-library pool types and deprecated `reusable` operations are in
+[section 14](#14-reusable-pools).
 Spec §3.3, §12.
 
 ```goose
@@ -1923,7 +1924,7 @@ resize fill or converted through a temporary array representation.
 
 ### Pool-relative links and `self`
 
-`pool` in `T&<u32 in pool>` names a global `var` or `reusable var` of a
+`pool` in `T&<u32 in pool>` names a global `var` or deprecated `reusable var` of a
 grow-only type whose elements hold a `T`; the pool is part of the type's
 identity. The stored value is the offset from the pool's base plus one,
 so 0 is null in the optional form and a `u32` link spans a pool of 4 GB.
@@ -1985,6 +1986,8 @@ non-optional relative-reference field whose pointee is the type being
 constructed. For an `in pool` field, the literal must also be built inside
 that pool (a `push`, an `alloc_ref`, an element store). The `reusable`
 pool and `alloc_ref` are explained in [section 14](#14-reusable-pools).
+This example retains the deprecated builtin because global pool-relative types
+cannot yet name a root component such as `pool.items`.
 
 ### Which form
 
@@ -2375,9 +2378,17 @@ argument is rejected. Spec §1.3, §4.2.
 ## 14. Reusable pools
 
 Some data has lifetimes that do not nest: cache entries, nodes of a graph
-that is edited, files deleted in any order. For these, a grow-only array
-of fixed-size elements can be declared `reusable`, and the compiler pairs
-it with a hidden freelist:
+that is edited, files deleted in any order. Use the standard library's
+[`slot_pool<T>`](stdlib.md#slot_pool) for individual slots and
+[`slice_pool<T>`](stdlib.md#slice_pool) for contiguous runs. Each is a root
+struct bundling an `items` array and its reuse metadata in one declaration.
+Owners must be local or global variables; functions take them by reference.
+
+**`reusable` and `reusable[]` are deprecated.** The builtins remain available
+for existing code and the [remaining migration gaps](design/root_structs.md#separate-follow-up-reusable-pools-in-the-stdlib).
+Their removal is a later step.
+
+Import `slot_pool` to use these operations:
 
 | Operation | Meaning |
 |---|---|
@@ -2394,17 +2405,18 @@ of the unsafety, and this design is what lets tree-mutating workloads run
 without an allocator.
 
 ```goose
+import slot_pool;
 struct Item { id: i32, weight: f32 }
 
 fn main() {
-    reusable var pool: Item[>..] = [];
+    var pool = slot_pool<Item> {};
     let s0 = pool.alloc_index(Item { 10, 1.0 });
     let s1 = pool.alloc_index(Item { 11, 1.0 });
     pool.free(s0);
     let s2 = pool.alloc_index(Item { 12, 2.0 });   // takes slot s0 back
     let node .= pool.alloc_ref(Item { 13, 3.0 });
-    pool.free(pool.index_of(node));                // a reference turned back into its slot
-    print("slots ", s0, " ", s1, " ", s2, ", pool length ", pool.len);
+    pool.free(pool.items.index_of(node));          // a reference turned back into its slot
+    print("slots ", s0, " ", s1, " ", s2, ", pool length ", pool.items.len);
 }
 ```
 
@@ -2412,21 +2424,21 @@ fn main() {
 slots 0 1 0, pool length 3
 ```
 
-A pool may be a local or a global. It never shrinks (its freelist keeps
-every slot live), and `push` and `append` still add at the end without
-consulting the freelist. A `T[>..]&` parameter bound to a pool is a *pool
-reference*. It carries the freelist beside the address, so the pool's
-operations work through it. A variable that was first bound to a pool can
-only be rebound to a pool of the same kind. Spec §5.4.
+A pool may be a local or a global. Its `items` array never shrinks through
+the pool API; `items.len` includes free slots. Use `items` for ordinary array
+access, and pass the owner as `slot_pool<T>&`. Elements must be fixed-size and
+normally copyable. Do not edit its `free_slots` metadata or shrink `items`
+directly. See the [library contract](stdlib.md#slot_pool) for supported types
+and lifetime rules.
 
 ### Slice pools
 
-`reusable[]` hands out *runs* of elements instead of single slots, with a
-freelist of spans that merges neighbours:
+`slice_pool<T>` hands out *runs* of elements instead of single slots, with a
+tree of free spans that merges neighbours:
 
 | Operation | Meaning |
 |---|---|
-| `a.alloc_slice(n) -> T[:]` | `n` elements from the first free span that holds them, else from the end of the array, which grows; every element added is a default value |
+| `a.alloc_slice(n) -> T[:]` | `n` elements from the first free span that holds them, else from the end of the array, which grows; every returned element is reset to its default |
 | `a.free_slice(s)` | records the run `s` for reuse |
 | `a.realloc_slice(s, n) -> T[:]` | `s` resized to `n` elements, in place where it can be, else freed and copied to where `alloc_slice(n)` puts it |
 
@@ -2434,8 +2446,9 @@ This suits the child lists of an n-ary tree: each node's entries are one
 contiguous run that can be walked as a plain slice.
 
 ```goose
+import slice_pool;
 fn main() {
-    reusable[] var pool: i64[>..] = [];
+    var pool = slice_pool<i64> {};
     let a = pool.alloc_slice(3);
     a[0] = 1; a[1] = 2; a[2] = 3;
     let b = pool.alloc_slice(2);
@@ -2443,7 +2456,7 @@ fn main() {
     pool.free_slice(a);
     let c = pool.alloc_slice(2);            // from the freed run, reset to defaults
     let d = pool.realloc_slice(b, 4);       // b ends the array: grows in place
-    print(c, " ", d, " ", pool.len, " ", pool);
+    print(c, " ", d, " ", pool.items.len, " ", pool.items);
 }
 ```
 
@@ -2451,12 +2464,32 @@ fn main() {
 [0, 0] [7, 8, 0, 0] 7 [0, 0, 3, 7, 8, 0, 0]
 ```
 
-The slice handed to `free_slice` or `realloc_slice` must be one of the
-pool's runs. Where the checker cannot prove that, the call checks it at
-run time and aborts if the slice is not one. A grown slice may be moved,
-so `realloc_slice` is unavailable for an element type holding
-self-relative links. A slice pool has no single-slot operations, and a
-plain `reusable` pool has none of these slice operations. Spec §5.4.
+Free and resize accept subranges of allocated runs. A nonempty slice must be
+aligned and wholly within `items`; where the checker cannot prove that, the
+call checks at runtime. Empty/default slices can be freed harmlessly, and growing
+an empty slice allocates a new run. Double frees remain logical errors; there
+is no occupancy check. A grown slice may be moved, so
+`realloc_slice` is unavailable for an element type holding self-relative
+links. Allocation and free do support defaultable self-relative elements.
+Pass an owner as `slice_pool<T>&`, and use its `items` array for indexing and
+slicing. The [library contract](stdlib.md#slice_pool) covers defaults,
+subranges, empty slices, high-water storage and relocation.
+
+### Deprecated builtin pools
+
+The legacy declarations `reusable var pool: T[>..] = [];` and
+`reusable[] var pool: T[>..] = [];` still provide the corresponding operations
+directly on the array, with hidden metadata. Their parameter type is `T[>..]&`;
+pool provenance carries the metadata through calls. Existing `push` and
+`append` operations add at the end without using freed spans. Their unchanged
+semantics are specified in [spec §5.4](goose_spec.md#54-reusable-arrays-safe-allocation-escape-hatch).
+
+To migrate, import the appropriate module, declare `slot_pool<T> {}` or
+`slice_pool<T> {}`, update owner parameters to the corresponding root reference,
+and use `pool.items` for array operations. Allocation/free method names remain
+the same. Global index/pool-relative types naming `pool.items`, destination-aware
+slot construction, and owner transfer to workers are still migration gaps;
+keep the deprecated builtins for code requiring those features.
 
 ---
 
@@ -4038,9 +4071,10 @@ standard library, written in Goose under `stdlib/` and documented in
 | `embed_file(path)`, `embed_shader(…)` | a file's bytes, or a compiled shader, read at compile time | [21](#embed_file) |
 
 The array members, `.len`, `.cap`, `.push`, `.append`, `.pop`, `.pop_n`,
-`.resize`, `.clear`, `.index_of`, are in [section 5](#members), and the
-pool operations `.alloc_index`, `.alloc_ref`, `.free`, `.alloc_slice`,
-`.realloc_slice`, `.free_slice` in [section 14](#14-reusable-pools).
+`.resize`, `.clear`, `.index_of`, `.range_index`, `.check_length` are in
+[section 5](#members). The stdlib pool APIs and deprecated builtin operations
+`.alloc_index`, `.alloc_ref`, `.free`, `.alloc_slice`, `.realloc_slice`,
+`.free_slice` are in [section 14](#14-reusable-pools).
 Spec §12.
 
 ---
@@ -4111,8 +4145,9 @@ Spec §6.1, Appendix D.
   initializer, used as a literal is. §2.
 * **Narrowing**: the region after an `if`, `while`, `guard` or `assert`
   in which an optional is a plain reference. §10.
-* **Pool**: a grow-only array used as storage for linked data; `reusable`
-  adds a freelist. §11, §14.
+* **Pool**: storage for linked or independently reused data. The stdlib's
+  `slot_pool` and `slice_pool` bundle a grow-only array with reuse metadata;
+  the language's `reusable` modifiers are deprecated. §11, §14.
 * **Relative reference**: a link stored as a narrow offset, self-relative
   or measured from a named pool's base. §11.
 * **Root**: the variable that bounds the lifetime of a reference's target;

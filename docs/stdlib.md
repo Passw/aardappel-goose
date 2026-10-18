@@ -560,7 +560,7 @@ if c { c.v += 1; }
 ## slot_pool
 
 `import slot_pool;` provides stable, reusable slots through ordinary root-struct
-fields and functions. It is available alongside the language's `reusable` arrays.
+fields and functions. Use it instead of the deprecated `reusable` language feature.
 
 ```goose
 root struct slot_pool<T> {
@@ -620,6 +620,8 @@ See [the migration plan](design/root_structs.md#separate-follow-up-reusable-pool
 
 `import slice_pool;` provides reusable contiguous runs of fixed-size, defaultable
 elements. An owner is declared as `var pool = slice_pool<T> {};`.
+Use it instead of the deprecated `reusable[]` language feature. Both builtins
+remain available for existing code; their removal is a separate future step.
 
 ```goose
 fn alloc_slice<T>(pool: slice_pool<T>&, n: i64) -> T[:]
@@ -643,9 +645,9 @@ fn main() {
 
 Allocation selects the first free span in index order that fits. If none fits,
 it grows the backing array, using any free span at the tail first. Free spans
-coalesce with their neighbors. An augmented B+ tree of 512-byte nodes keeps
-first-fit search and neighbor lookup logarithmic in the number of spans; emptied
-nodes are reused. The policy matches `reusable[]`.
+coalesce with their neighbors. An augmented B+ tree of 512-byte nodes handles
+first-fit search and neighbor lookup with tree walks and bounded node scans;
+emptied nodes are reused. The policy matches `reusable[]`.
 
 `alloc_slice` defaults every element it hands out, including reused elements.
 `realloc_slice` preserves the first `min(s.len, n)` elements, returns a shortened
@@ -679,6 +681,9 @@ Global index/pool-relative types naming a root component need the remaining
 migration features described in [the plan](design/root_structs.md#separate-follow-up-reusable-pools-in-the-stdlib).
 Optional references to separately owned storage and declared field defaults are
 supported when `T` has a default.
+
+See the [slice-pool benchmark report](../bench/slice_pool.md) for comparisons
+against `reusable[]`, including preserved function-call boundaries.
 
 ## vec
 

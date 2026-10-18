@@ -1,5 +1,11 @@
 # kostya/benchmarks in Goose
 
+> **Deprecated language features:** `reusable` and `reusable[]`. Use
+> [`slot_pool<T>`](../../docs/stdlib.md#slot_pool) for slots and
+> [`slice_pool<T>`](../../docs/stdlib.md#slice_pool) for contiguous runs.
+> Builtin behavior and historical examples below remain relevant to existing
+> code; removal is planned separately, after the remaining migration gaps.
+
 Goose versions of the five tests of
 [kostya/benchmarks](https://github.com/kostya/benchmarks) (Brainfuck,
 Base64, Json, Matmul, Primes), laid out the way that repository lays out a

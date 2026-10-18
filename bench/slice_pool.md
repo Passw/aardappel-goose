@@ -6,6 +6,9 @@
 remain available for existing code and the remaining migration gaps; this report
 retains `reusable[]` as the comparison baseline.
 
+The [application benchmark comparison](pool_workloads.md) covers LangArena and
+kostya/benchmarks, including graph preparation outside the suite's search timer.
+
 The library uses the builtin's augmented B+ tree policy: first-fit placement,
 neighbor coalescing, tail reuse, emptied-node recycling and overlap-safe
 relocation. It does not substitute a linear freelist or change allocation order.

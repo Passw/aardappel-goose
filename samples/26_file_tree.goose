@@ -2,7 +2,7 @@
 // node lives in a `reusable` pool of slots, and the program holds ordinary
 // references to them, while the tree itself links them with 4-byte offsets
 // from the pool's base. A directory's entries are one contiguous run of those
-// links in a `reusable[]` pool of slices, so an entry list is a plain slice to
+// links in a `slice_pool<Link>`, so an entry list is a plain slice to
 // walk. Adding an entry grows that run in place when there is room after it,
 // and otherwise moves it where a new run of that size would go. Removing a
 // subtree gives its slots and runs back, and the next additions take them
@@ -10,6 +10,8 @@
 //
 // Build and run (from this directory):
 //   goose -o file_tree.c 26_file_tree.goose && cl file_tree.c && file_tree
+
+import slice_pool;
 
 // A link to a node: an offset into `nodes` (§3.9). The cells a run gains start
 // out as the default value, null, so the link is optional, but every link
@@ -22,7 +24,7 @@ struct Node {
 }
 
 reusable var nodes: Node[>..] = [];
-reusable[] var runs: Link[>..] = [];
+var runs = slice_pool<Link> {};
 
 // A node with no entries: an empty run, placed by the first addition.
 fn make(name: u8[:]) -> Node& {
@@ -109,7 +111,7 @@ fn listing(what: u8[:]) {
     var out: u8[>..] = [];
     let live = show(root, 0, out);
     print("-- ", what, ": ", live, " nodes in ", nodes.len, " slots, ", live - 1, " links in ",
-          runs.len, " cells");
+          runs.items.len, " cells");
     print(out[..^1]);
 }
 

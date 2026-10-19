@@ -23,8 +23,7 @@
 This note is a research example. The requirement is a runtime-sized set of
 independently editable buffers, with memory reclaimed when each document
 closes. The difficulty is independent growth and release in arbitrary order,
-not the representation of a list of strings. `reusable[]` slice pools (spec
-5.4) now express this inside the language. This note shows that
+not the representation of a list of strings. Stdlib `slice_pool<T>` expresses this with root-owned storage. This note shows that
 representation and what it costs, which earlier workarounds remain useful, and
 two possible future extensions that cover what slice pools leave out: bounded
 independent dynamic stacks and opaque API resources. Neither extension is an
@@ -52,16 +51,18 @@ or tokens too, but one buffer per document already exposes the issue.
 
 ## Documents as runs in a slice pool
 
-A document is a descriptor in a `reusable` pool of slots, and its text is one
-run of bytes in a `reusable[]` pool. The open documents are a list of links
+A document is a descriptor in a legacy `reusable` pool of slots, and its text is
+one run of bytes in a stdlib `slice_pool<u8>`. The open documents are a list of links
 into the descriptor pool (§3.9), which is also what lets the operations take a
 `Document&`:
 
 ```goose
+import slice_pool;
+
 struct Document { id: u64, text: u8[:] }   // the document's current run of bytes
 
 reusable var docs: Document[>..] = [];
-reusable[] var bytes: u8[>..] = [];
+var bytes = slice_pool<u8> {};
 var open: Document&<u32 in docs>?[>..] = [];   // in tab order; pruned elsewhere
 
 fn open_doc(id: u64, size: i64) -> Document& {
@@ -79,6 +80,10 @@ fn close(d: Document&) {
     docs.free(docs.index_of(d));
 }
 ```
+
+The descriptor pool still uses the deprecated builtin because its compact
+`in docs` links cannot yet name a root owner's `docs.items` component. See the
+[remaining migration work](root_structs.md#global-component-paths).
 
 `alloc_slice` places a run in the first free span (in index order) that can
 hold it, or else at the end of the array. `realloc_slice` grows a run in place

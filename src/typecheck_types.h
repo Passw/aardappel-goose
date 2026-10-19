@@ -1022,18 +1022,54 @@ inline bool TypeCheck::NamedResultKeepsLinks(TypeExpr *t) {
 
 // Names resolve once, before any type is instantiated, so the pool is
 // part of the type's identity from the first comparison on.
+inline VarDef *TypeCheck::NamedArrayComponent(VarDef *global, string_view name, Line line) {
+    auto dot = name.find('.');
+    if (dot == string_view::npos) return global;
+    auto field = name.substr(dot + 1);
+    if (field.find('.') != string_view::npos)
+        Error(line, cat("in ", name, ": a named array component must be a direct field of a "
+                        "global root owner"));
+    auto &c = namedcomponents[{ global, field }];
+    if (!c) {
+        c = ast.NewVarDef();
+        c->name = ast.Intern(cat(global->name, ".", field));
+        c->line = line;
+        c->isglobal = true;
+        c->isvar = global->isvar;
+        c->componentowner = global;
+    }
+    return c;
+}
+
+inline void TypeCheck::ValidateNamedComponents() {
+    for (auto &[key, c] : namedcomponents) {
+        auto [owner, field] = key;
+        auto t = owner->type;
+        if (!t || t->kind != TY_STRUCT || !t->struc->st->isroot)
+            Error(c->line, cat("in ", c->name, ": a named array component must be a direct "
+                               "field of a global root owner"));
+        if (c->componentfield < 0)
+            Error(c->line, cat("in ", c->name, ": root struct ", t->struc->st->name,
+                               " has no field ", field));
+        if (t->cq || t->struc->st->fields[c->componentfield].isconst || c->type->cq)
+            Error(c->line, cat("in ", c->name, ": a named array component must be mutable"));
+    }
+}
+
 inline void TypeCheck::ResolvePools() {
     for (auto t : ast.alltypes) {
         if (t->kind != TY_REF || t->ref->poolname.empty()) continue;
-        auto g = ast.LookupGlobal(t->ref->poolname, t->ref->poolns);
+        auto name = t->ref->poolname;
+        auto g = ast.LookupGlobal(name.substr(0, name.find('.')), t->ref->poolns);
         if (!g || g->defs.empty())
             Error(t->line, cat("in ", t->ref->poolname,
                                ": a relative reference's pool must be a global variable; a "
                                "local or parameter pool has no name at this declaration, so "
                                "use the self-relative form ", TypeStr(t->ref->sub), "&<",
                                IntStorageName(t->ref->lenstorage), "> instead (§3.9)"));
-        t->ref->pool = g->defs[0];
+        t->ref->pool = NamedArrayComponent(g->defs[0], name, t->line);
         poolglobals.insert(t->ref->pool);
+        if (t->ref->pool->componentowner) poolowners.insert(t->ref->pool->componentowner);
     }
 }
 
@@ -1043,12 +1079,13 @@ inline void TypeCheck::ResolvePools() {
 inline void TypeCheck::ResolveIndexTypes() {
     for (auto t : ast.alltypes) {
         if (t->kind != TY_INT || !t->ix || t->ix->arr) continue;
-        auto g = ast.LookupGlobal(t->ix->name, t->ix->ns);
+        auto name = t->ix->name;
+        auto g = ast.LookupGlobal(name.substr(0, name.find('.')), t->ix->ns);
         if (!g || g->defs.empty())
             Error(t->line, cat("in ", t->ix->name, ": the array of an index type must be a "
                                "global variable; a local or parameter has no name where a "
                                "type is declared (§3.11)"));
-        t->ix->arr = g->defs[0];
+        t->ix->arr = NamedArrayComponent(g->defs[0], name, t->line);
         indexarrays.insert(t->ix->arr);
     }
 }
@@ -1068,13 +1105,21 @@ inline void TypeCheck::ValidateIndexType(TypeExpr *t) {
                            "which cannot be indexed, so nothing can be an index of it (§3.11)"));
 }
 
-// The pool a reference rooted at `r` points into, or null. A global names
-// itself; a synthetic parameter class names what every call site that
-// reaches this specialization passed, which is part of its key.
+// The named pool or owner a reference rooted at `r` points into, or null.
+// A parameter class retains the identity shared by its call sites. Projecting
+// an owner class selects that same global owner's component.
 inline VarDef *TypeCheck::PoolOf(VarDef *r) {
     if (!r) return nullptr;
-    if (r->isglobal) return poolglobals.count(r) ? r : nullptr;
-    return r->classpool;
+    if (r->isglobal) return poolglobals.count(r) || poolowners.count(r) ? r : nullptr;
+    if (r->classpool) return r->classpool;
+    if (r->componentowner) {
+        auto owner = PoolOf(r->componentowner);
+        if (owner && owner->type && TypeEq(owner->type, r->componentbase)) {
+            auto c = owner->components[r->componentfield];
+            return poolglobals.count(c) ? c : nullptr;
+        }
+    }
+    return nullptr;
 }
 
 // The pool must be storage a `T` can live in, and one whose base never

@@ -926,7 +926,8 @@ allocation header per node. A thousand random inserts give:
 ### `self`, and sentinels
 
 The linked-list example below retains the **deprecated `reusable` builtin**:
-global pool-relative types cannot yet name `pool.items`. Use
+its sentinel needs `self` constructed in the allocated slot, which the library
+pool's value parameter cannot yet provide. Use
 [`slot_pool<T>`](stdlib.md#slot_pool) and [`slice_pool<T>`](stdlib.md#slice_pool)
 for new code that does not need the [remaining migration features](design/root_structs.md#separate-follow-up-reusable-pools-in-the-stdlib).
 

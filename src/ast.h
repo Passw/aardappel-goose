@@ -1706,8 +1706,8 @@ struct VarDef {
     // from the cycle store rule.
     VarDef *classfrom = nullptr;
     bool poolclass = false;
-    // The global pool every call site's argument for this class is rooted in
-    // (§3.9); null where there is none, which is the usual case.
+    // The global pool, or owner of named pool components, every call site's
+    // argument for this class is rooted in (§3.9); usually null.
     VarDef *classpool = nullptr;
     // Synthetic class roots only: the call-site root holds a grow-shrink
     // array, so the shrink rules follow the class into the body (§5.2);
@@ -1997,8 +1997,9 @@ struct RootArg {
     // concrete and exact, which SettleParamRootExactness settles.
     vector<pair<FnSpec *, int>> via;
     // The global pool the argument is exactly rooted in, where that global is
-    // named by some `T&<w in pool>` type in the program (§3.9); null
-    // otherwise, which is every argument of a program that has no such type.
+    // named by some `T&<w in pool>` type in the program (§3.9), or the owner
+    // of named pool components; null otherwise, which is every argument of
+    // a program that has no such type.
     // Unlike `exact` this *is* part of the key: a relative store measures from
     // this pool's base, so a call site passing a different one is a different
     // specialization rather than a fact to weaken afterwards.

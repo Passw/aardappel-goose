@@ -354,6 +354,12 @@ struct Parser {
         return ast.Intern(cat(name, "::", ExpectIdent(context)));
     }
 
+    string_view ParseStorageName(const char *context) {
+        auto name = ParseQualifiedName(context);
+        while (IsNext(T_DOT)) name = ast.Intern(cat(name, ".", ExpectIdent(context)));
+        return name;
+    }
+
     // A top-level declaration's name: `name` in the file's namespace, or
     // `ns::name` / `::name` placing it in that namespace instead, which is
     // how a dump carries every file's namespace in one file. The rest of
@@ -1011,7 +1017,7 @@ struct Parser {
                         // `T&<u32 in pool>`: offsets measured from a named
                         // global pool rather than from the field (§3.9).
                         if (IsNext(T_IN)) {
-                            r->ref->poolname = ParseQualifiedName("relative reference pool");
+                            r->ref->poolname = ParseStorageName("relative reference pool");
                             r->ref->poolns = curns;
                         }
                         ExpectClosingAngle("relative reference width");
@@ -1096,7 +1102,7 @@ struct Parser {
                 it->intstorage = t->intstorage;
                 it->ix = ast.NewDetail<TypeIndex>();
                 it->ix->upto = upto;
-                it->ix->name = ParseQualifiedName(upto ? "bound type" : "index type");
+                it->ix->name = ParseStorageName(upto ? "bound type" : "index type");
                 it->ix->ns = curns;
                 // It takes no postfix: `u32 in nodes[>..]` would read as an
                 // index into `nodes[>..]`.

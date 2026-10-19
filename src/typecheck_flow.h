@@ -605,7 +605,10 @@ inline VarDef *TypeCheck::RootComponent(VarDef *owner, TypeExpr *t, int field) {
     } else {
         owner->components.resize(si->ftypes.size(), nullptr);
         auto &slot = owner->components[field];
-        if (!slot) slot = ast.NewVarDef();
+        if (!slot) {
+            auto it = namedcomponents.find({ owner, si->st->fields[field].name });
+            slot = it == namedcomponents.end() ? ast.NewVarDef() : it->second;
+        }
         c = slot;
     }
     c->componentowner = owner;

@@ -1675,6 +1675,11 @@ struct TypeCheck {
 
     void ResolvePools();
     void ResolveIndexTypes();
+    VarDef *NamedArrayComponent(VarDef *global, string_view name, Line line);
+    void ValidateNamedComponents();
+    // Identities exist before type instantiation, including a Node whose
+    // fields refer to the items component of a slot_pool<Node> global.
+    map<pair<VarDef *, string_view>, VarDef *> namedcomponents;
     void ValidateIndexType(TypeExpr *t);
     // The globals some index or bound type names: never shrunk (§3.11).
     set<VarDef *> indexarrays;
@@ -1683,6 +1688,7 @@ struct TypeCheck {
     // for a program without the feature, which is what keeps `RootArg::pool`
     // from splitting any specialization such a program would not have split.
     set<VarDef *> poolglobals;
+    set<VarDef *> poolowners;   // Owners whose named components distinguish call-site roots.
 
     VarDef *PoolOf(VarDef *r);
     void ValidatePool(TypeExpr *t);
@@ -3041,6 +3047,7 @@ struct TypeCheck {
                 for (auto d : g->defs) failedglobals.insert(d);
             }
         }
+        ValidateNamedComponents();
         // Concrete ones only; a pointee still spelled with a type parameter
         // gets here again once a specialization substitutes it.
         for (auto t : ast.alltypes) {
@@ -3259,6 +3266,11 @@ struct TypeCheck {
                 if (found) return nullptr;
                 found = g;
             }
+            for (auto g : poolowners) {
+                if (!g->type || !TypeEq(g->type, t->ref->sub)) continue;
+                if (found) return nullptr;
+                found = g;
+            }
             return found;
         };
         map<VarDef *, int> poolclasses;
@@ -3336,10 +3348,17 @@ struct TypeCheck {
     // holding references into other storage cannot be.
     void CheckThreadGlobals(FnSpec *entry) {
         set<FnSpec *> seen;
+        set<TypeExpr *> namedtypes;
         function<void(FnSpec *)> rec = [&](FnSpec *sp) {
             if (!sp || !sp->body || !seen.insert(sp).second) return;
             function<void(Node *)> walk = [&](Node *n) {
                 if (!n) return;
+                NodeNamedArrays(n, namedtypes, [&](VarDef *a, bool) {
+                    if (auto owner = a->componentowner)
+                        Error(n, cat("thread programs cannot copy root global ", owner->name,
+                                     " (named by a type reached from thread_fn ", entry->sf->name,
+                                     "); construct worker-local state instead"));
+                });
                 if (auto id = Is<Ident>(n)) {
                     auto g = id->vdef;
                     if (g && g->isglobal && g->type && ClassOf(g->type) == SC_ROOT)

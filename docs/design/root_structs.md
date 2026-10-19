@@ -400,19 +400,38 @@ lacks field privacy: internal-field conventions and checked indexing preserve
 memory safety, but arbitrary user edits may violate pool invariants. Privacy is
 a separate possible improvement, not a prerequisite for root structs.
 
-The migration needs the following additional work:
+The migration requires the following capabilities; completed ones are noted:
 
 ### Global component paths
 
-Allow pool-relative references and index/bound types to name a statically
-resolved global component, for example `Node&<u32 in nodes.items>` and
-`u32 in nodes.items`. Resolve a global declaration plus field path, not arbitrary
-expressions or rebindable references. Preserve width checks, exact-root rules,
-type identity and the existing no-shrink rule for index-typed arrays. Do not
-silently interpret `in nodes` as whichever field looks like the data array.
+Implemented for mutable direct array fields of global `var` root owners:
+`Node&<u32 in nodes.items>`, `u32 in nodes.items`, and `u32 upto nodes.items`.
+Owner names may be namespace qualified. The target must be a grow-only array;
+aliases, reference crossings, indices and nested field paths are rejected.
+`in nodes` still means exactly that global, with no implicit `.items` selection.
 
-This extension can follow initial root support; generic root owners do not
-require a new global-index notation to be useful.
+The component identity is reserved before types are instantiated, so recursive
+declarations such as `Node` linking into `slot_pool<Node>.items` keep the same
+identity throughout checking. The owner's field resolves to that existing
+component when its type becomes known. Owner-reference specializations retain
+named component identity through helper calls. Width checks, exact-root rules,
+index/bound type identity and the index array's no-shrink rule remain in force.
+Bounds analysis identifies a named component with the corresponding field
+expression; codegen uses its existing global header and cached base directly.
+
+Types can use array bases and lengths without an identifier expression. These
+dependencies participate in call-cache synchronization and worker checks. An
+implicit dependency on a root component is rejected in workers, just like an
+explicit use of its owner. Image verification flushes cached counts before
+checking serialized indices against global array lengths.
+
+Validation includes namespace/alias round-trips, cyclic node/pool declarations,
+global field initializers, owner-reference forwarding, compact-width overflow,
+index bounds and image validation, cross-field/owner rejections, no-shrink
+checks through owner and array parameters, and implicit worker dependencies.
+The full native baseline passes at O0/O2 with TinyCC and runtime-debug coverage;
+24 focused fixtures also pass with compiler assertions enabled. Optional native
+modules and sanitizer configurations were not run for this extension.
 
 ### Destination-aware library construction
 
@@ -428,6 +447,17 @@ API such as `pool.alloc_with() { Node { value: 2, next: first } }`. Extend the
 existing construction-destination machinery so a function-value initializer can
 construct directly into the selected existing slot or append destination.
 The existing trailing block mechanism alone does not supply this capability.
+
+The library's slot-selection algorithm can be ordinary code: assign `F()` into
+a recycled slot or `push(F())` for a new one. The immediate gap is that
+`CheckFunValCall` checks the block's tail without the receiving destination and
+returns a temporary copy. A literal linking to an existing node therefore has
+no proof that its self-relative offsets will be stored in the same region.
+Codegen already expands trailing blocks inline and can pass an lvalue
+destination to their tail. A focused first extension should propagate the
+construction destination through such blocks, recognize those results as
+constructed in place, and preserve that destination through assignment and
+push lowering. Ordinary named-function returns need not be generalized first.
 
 Preserve `self`, root checks, evaluation once and in order, construction conflict
 checking, lexical/nonlocal returns, and publication of a fresh slot only once it
@@ -471,8 +501,8 @@ comparison, not a replacement for Goose's existing reuse semantics.
 Deprecate `reusable` and `reusable[]` in documentation and recommend the library
 types for new code. Keep the syntax, diagnostics and runtime behavior available
 for existing code. Removal is a later change, after destination-aware slot
-construction, global component index/relative types and worker transfer have a
-reviewed migration path. Worker-local library pools already work. Continue
+construction and worker transfer have a reviewed migration path. Global
+component index/relative types and worker-local library pools already work. Continue
 measuring application workloads as well as allocation-heavy microbenchmarks;
 small regressions alone do not require retaining a language-level allocator.
 
@@ -562,5 +592,5 @@ existing array caches. They do not establish a performance guarantee for every
 aliasing pattern or a migration result for reusable pools. Implementation steps
 1–4 are complete. Step 5 now has both pool implementations, differential tests
 and repeatable benchmarks. Checked slice positions and length validation are
-implemented. Destination-aware slot construction, global component paths and
-worker transfer remain, alongside the explicit v2 candidates.
+implemented, as are global component paths. Destination-aware slot construction
+and worker transfer remain, alongside the explicit v2 candidates.

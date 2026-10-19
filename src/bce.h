@@ -517,7 +517,17 @@ struct BCE {
 
     // The place a variable's own array/slice value occupies (used at
     // declarations and whole-variable assignments, where no obj node exists).
-    int PlaceOfVar(VarDef *v) { return v ? PlaceFor(v, {}, v->type) : -1; }
+    int PlaceOfVar(VarDef *v) {
+        if (!v) return -1;
+        auto t = v->type;
+        vector<int> path;
+        while (v->componentowner) {
+            path.push_back(v->componentfield);
+            v = v->componentowner;
+        }
+        std::reverse(path.begin(), path.end());
+        return PlaceFor(v, path, t);
+    }
 
     // The slice or array an element of a tracked resizable or limited array
     // holds (`adj[v]`, `g.rows[i]`): one place for all the elements, its

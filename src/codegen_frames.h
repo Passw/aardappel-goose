@@ -884,7 +884,10 @@ inline string CodeGen::PoolBase(const VarDef *pool) {
     // function to hoist a load to, so read the header there.
     if (!curspec) return cat(gnames[pool], ".base");
     for (auto &p : poolbases) if (p.first == pool) return p.second;
-    auto name = Unique2(cat("gs_pb_", Sanitize(pool->name)));
+    auto stem = pool->componentowner
+        ? cat(Sanitize(pool->componentowner->name), "_", pool->componentfield)
+        : Sanitize(pool->name);
+    auto name = Unique2(cat("gs_pb_", stem));
     poolbases.push_back({ pool, name });
     return name;
 }

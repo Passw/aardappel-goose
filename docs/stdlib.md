@@ -610,10 +610,12 @@ array bounds and lifetime checks still apply. There is no whole-pool reset API
 in this initial version; a new owner starts empty. An eligible `items` component
 can be serialized separately, but its image omits the freelist.
 
-This first version does not replace every use of `reusable`: self-relative
-values requiring construction at their destination cannot be passed through a
-value parameter, global index/pool-relative types cannot yet name `pool.items`,
-and a root owner cannot be copied to a worker. Worker-local pools are allowed.
+For a global `var pool`, compact links and index types can name its array:
+`Node&<u32 in pool.items>`, `u32 in pool.items`, and `u32 upto pool.items`.
+Pool-relative values with ordinary links are copyable and work with `alloc_ref`.
+Self-relative values, and `self` initializers that need the allocated slot as
+their destination, still need construction support beyond the value parameter.
+A root owner cannot be copied to a worker; worker-local pools are allowed.
 See [the migration plan](design/root_structs.md#separate-follow-up-reusable-pools-in-the-stdlib).
 
 ## slice_pool
@@ -677,8 +679,7 @@ The owner follows the same placement, serialization and worker restrictions as
 owners rather than transferring root owners. `alloc_slice` constructs defaults
 in place, so allocation and free support defaultable self-relative elements;
 `realloc_slice` requires normally copyable elements, just as the builtin does.
-Global index/pool-relative types naming a root component need the remaining
-migration features described in [the plan](design/root_structs.md#separate-follow-up-reusable-pools-in-the-stdlib).
+Global index/pool-relative types can name `pool.items`, as for `slot_pool`.
 Optional references to separately owned storage and declared field defaults are
 supported when `T` has a default.
 

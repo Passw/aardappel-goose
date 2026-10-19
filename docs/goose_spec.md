@@ -937,6 +937,13 @@ error. For a local or parameter pool, the error points to the
 self-relative form, since the pool is named where the field is declared,
 and a local's name means nothing there.
 
+The name may also select a mutable direct array field of a global `var`
+`root struct`, as in `Node&<u32 in nodes.items>`. The owner name may be namespace
+qualified. The compiler resolves the declaration and field statically; aliases,
+reference crossings, array indexing and nested field paths are not supported.
+Each component is a separate pool identity with its own base. The same
+grow-only, pointee-containment and width requirements apply to the array field.
+
 * The pool is part of the type's identity: `Node&<u32 in pool>` is neither
   `Node&<u32>` nor `Node&<u32 in spare>`. Loading either form yields an
   ordinary `Node&`, and storing re-encodes.
@@ -1081,6 +1088,10 @@ var edges: NodeId[>..] = [];
   else is a compile error: a local or parameter has no name where a type
   is declared, any other array kind can shrink, and a sequential array
   cannot be indexed.
+  A mutable direct array field of a global `var` root is also allowed, as in
+  `u32 in graph.nodes` or `u32 upto graph.edges`, using the same component-name
+  resolution as §3.9. Its identity and no-shrink rule belong to that component,
+  independently of the owner's other fields.
 * The array is part of the type's identity: `u32 in nodes` is neither
   `u32`, `u16 in nodes`, `u32 upto nodes` nor `u32 in edges`. The value is
   the plain integer; the C type is that of `uN`.

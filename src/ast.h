@@ -1897,6 +1897,31 @@ template<typename R> bool HasRelRefOf(TypeExpr *t, bool inpool, R runs) {
     }
 }
 
+// Named storage used implicitly by a checked type: relative-reference bases
+// and index/bound lengths. The callback's flag distinguishes mutable lengths
+// from stable bases. The caller retains seen across a body if desired.
+template<typename F> void NamedArraysIn(TypeExpr *t, set<TypeExpr *> &seen, F f) {
+    if (!t || !seen.insert(t).second) return;
+    auto visit = [&](TypeExpr *ft) { NamedArraysIn(ft, seen, f); };
+    switch (t->kind) {
+        case TY_INT: if (t->ix && t->ix->arr) f(t->ix->arr, true); break;
+        case TY_REF:
+            if (t->ref->pool) f(t->ref->pool, false);
+            visit(t->ref->sub);
+            break;
+        case TY_SLICE: visit(t->sub); break;
+        case TY_ARRAY: visit(t->arr->sub); break;
+        case TY_STRUCT:
+            if (t->struc->inst) EachFieldOf(RunsOf(t->struc->inst), visit);
+            break;
+        case TY_ENUM:
+            if (t->enu->inst) EachFieldOf(RunsOf(t->enu->inst), visit);
+            break;
+        case TY_VARIANT: visit(t->var->adt); break;
+        default: break;
+    }
+}
+
 // Call-site facts about one reference/slice or holder parameter, part of the
 // specialization key (§10.2): the relative-outlives class of its root among
 // the call's reference arguments (0 = static, 1 = outermost, ...), where

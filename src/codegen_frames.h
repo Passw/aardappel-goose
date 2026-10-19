@@ -133,11 +133,15 @@ inline void CodeGen::CollectSpecs() {
         auto &si = sinfo[sp];
         auto &calls = callees[sp];
         set<const VarDef *> seen;
+        set<TypeExpr *> namedtypes;
         set<pair<FnSpec *, const Call *>> seencalls;
         for (auto pt : sp->argtypes) si.needssp |= NeedsStack(pt);
         for (auto rt : sp->rets) si.needssp |= NeedsStack(rt);
         function<void(Node *)> walk = [&](Node *n) {
             if (!n) return;
+            NodeNamedArrays(n, namedtypes, [&](VarDef *a, bool length) {
+                if (length) si.globals.insert(a);
+            });
             if (auto id = Is<Ident>(n)) {
                 auto v = id->vdef;
                 // A global initializer's locals have no ownerspec: every spec

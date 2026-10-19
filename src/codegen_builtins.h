@@ -987,10 +987,12 @@ inline vector<VarDef *> &CodeGen::ThreadGlobals(FnSpec *entry) {
     if (it != threadglobals.end()) return it->second;
     set<FnSpec *> seen;
     set<VarDef *> named;
+    set<TypeExpr *> namedtypes;
     function<void(FnSpec *)> rec = [&](FnSpec *sp) {
         if (!sp || !sp->body || !seen.insert(sp).second) return;
         function<void(Node *)> walk = [&](Node *n) {
             if (!n) return;
+            NodeNamedArrays(n, namedtypes, [&](VarDef *a, bool) { named.insert(a); });
             if (auto id = Is<Ident>(n))
                 if (auto v = id->vdef; v && v->isglobal && !gstatic.count(v)) named.insert(v);
             if (auto c = Is<Call>(n)) {
@@ -1394,6 +1396,12 @@ inline vector<string> CodeGen::EmitFromBytes(Call *c, vector<Node *> &an, Dst d0
         Bump(bstk, bn);
     }
     auto cnt = T();
+    // The verifier reads index types' array lengths through global headers.
+    // Those counts may still be held in this function's stack caches.
+    set<TypeExpr *> seen;
+    string reach;
+    NamedArraysIn(elem, seen, [&](VarDef *a, bool) { reach += cat(gstks[a], "\x01"); });
+    if (!reach.empty()) MarkFlush(reftops || topdst || topcap ? "*" : reach);
     L("int64_t ", cnt, " = ", ok, " ? ", vf, "(", pay, ", ", pn, ", ", bm, ") : -1;");
     L(ok, " = ", cnt, " >= 0;");
     auto rd = OpenRzDest(t, d0, ln, "from_bytes");

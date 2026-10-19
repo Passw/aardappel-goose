@@ -114,7 +114,9 @@ and 2-m 39 ms at 8000, and mandelbrot/1-m 21 ms at 5000.
   iterations on workers.
 * **merkletrees** forbids arenas ("every tree node needs to be either
   separately freed or GCed"), so its nodes come one at a time from a
-  `reusable` pool with a freelist, and each tree is freed node by node.
+  `reusable` pool with a freelist, and each tree is freed node by node. The
+  [component-path pool comparison](../pool_workloads.md#global-component-paths-and-scalar-migrations-2026-10-19)
+  found a material slowdown in the library version; migration is deferred.
 * **coro-prime-sieve**: Goose has no coroutines, and its queues are one per
   element type, so the chain of thousands of filters cannot be a chain of
   threads either. The program builds the same chain as the generator

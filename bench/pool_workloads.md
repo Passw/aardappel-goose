@@ -144,8 +144,8 @@ structures are unchanged; replacing graph adjacency lists with compressed sparse
 rows would measure a different algorithm.
 
 The scalar-pool users in `bench/goose/lru*.goose`, `bench/plb/lru` and
-`bench/plb/merkletrees` remain on `reusable`. They use compact pool-relative
-links, destination-aware self construction, or self-relative values that
+`bench/plb/merkletrees` initially remained on `reusable`. They use compact
+pool-relative links, destination-aware self construction, or self-relative values that
 cannot pass through `slot_pool`'s value argument. Even `lru_indices` has
 self-relative links inside its nodes. Substituting full pointers or a different
 node layout would confound the allocator comparison. These are compatibility
@@ -194,9 +194,35 @@ output is unchanged at O0/O2 with both native debug checks and TinyCC. The
 document-buffer example in `docs/design/owning_dynamic_data.md` compiles and runs
 with the library pool. Compiler and stdlib sources remain unchanged.
 
+## Global component paths and scalar migrations, 2026-10-19
+
+Global array-field names now work in compact reference and index types.
+`bench/goose/lru.goose` uses `slot_pool`, with its links naming `pool.items`.
+The compact node/map layouts and workload algorithms are unchanged.
+The file-tree sample and document-buffer example also
+use `slot_pool` for their descriptors. The slot microbenchmark template is named
+`goose/slot_pool_bench.goose` so that it does not shadow the stdlib import from
+neighboring benchmark sources.
+
+The self-relative LRU variants and the sentinel-based PLB LRU variants still
+need destination-aware construction. They remain on the builtin.
+
+The [paired scalar results](root_component_pool_results.json) compare the
+previous committed source with each migration using the same compiler, Goose
+O2 and Clang C O2, on CPUs 16–31. One warmup and five measured runs alternate
+the two versions; times cover the complete process. Every output matches.
+LRU's full 8,000,000-operation workload measures 299.9 ms builtin versus
+257.2 ms library (0.858x). Its 16-byte nodes and 8-byte map slots are unchanged.
+This is one local session, not a claim of a portable speedup.
+
+The Merkle-tree migration is now expressible with its existing layout, but at
+depth 16 measures 70.6 ms builtin versus 114.4 ms library (1.620x). It remains
+on `reusable` pending investigation of this larger gap. Source hashes and all
+individual samples are retained in the results file.
+
 ## Remaining optimization work
 
-There is no demonstrated simple library change that closes the remaining gap.
+There is no demonstrated simple library change that closes the remaining slice-pool gap.
 Useful directions are eliminating redundant path initialization when writes
 can be proven complete, improving bounds proofs across tree helpers, and safe
 bulk relocation/defaulting code generation. They need care around overlapping

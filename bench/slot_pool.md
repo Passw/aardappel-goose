@@ -27,7 +27,7 @@ sizes, all timing samples and `results.json`. Results include fingerprints of
 the library and workload source. Filter the matrix with `--modes`, `--widths`,
 `--levels` and `--calls`; the defaults exercise the complete matrix.
 
-Both implementations are derived from `goose/slot_pool.goose`. The conversion
+Both implementations are derived from `goose/slot_pool_bench.goose`. The conversion
 changes the owning declarations, parameter type and `items` projections; the
 loops, values, allocation/free order and checksums stay the same. Two owners are
 used, with three quarters of the work on one and one quarter on the other.

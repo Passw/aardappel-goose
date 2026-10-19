@@ -115,7 +115,7 @@ def main():
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(ROOT / "bench/goose/rng.goose", out / "rng.goose")
-    template = (ROOT / "bench/goose/slot_pool.goose").read_text(encoding="utf-8")
+    template = (ROOT / "bench/goose/slot_pool_bench.goose").read_text(encoding="utf-8")
     results, checksums = [], {}
     metadata = dict(platform=platform.platform(), n=args.n, grow_n=args.grow_n,
                     live=args.live, reps=args.reps, warmups=args.warmups, executable=str(exe),

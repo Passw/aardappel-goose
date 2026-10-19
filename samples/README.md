@@ -98,7 +98,7 @@ run as part of the test suite.
 
 | Sample | What it shows |
 |---|---|
-| [26_file_tree](26_file_tree.goose) | A directory tree: the nodes are kept in a legacy `reusable` pool and passed around as references. Each directory's entries are one run of 4-byte `in pool` links in a stdlib `slice_pool`, and a run is grown in place or moved by `realloc_slice`. `rm -r` returns slots and runs to the pools, `mv` relinks, and the pools' counts show the reuse. |
+| [26_file_tree](26_file_tree.goose) | A directory tree: the nodes are kept in a stdlib `slot_pool` and passed around as references. Each directory's entries are one run of 4-byte `in nodes.items` links in a stdlib `slice_pool`, and a run is grown in place or moved by `realloc_slice`. `rm -r` returns slots and runs to the pools, `mv` relinks, and the pools' counts show the reuse. |
 
 ## The GPU
 

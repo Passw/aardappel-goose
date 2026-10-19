@@ -135,12 +135,13 @@ family on the builtin is the conservative choice when requiring migration
 costs to stay within measurement noise. No algorithm or safety change is
 warranted to chase them here.
 
-## Migration decisions
+## Initial migration decisions, 2026-10-18
 
-Matmul (including worker-local pools) and Game of Life use `slice_pool`.
-Graph, Maze and Primes retain `reusable[]` because their setup/trie-building
-costs regress measurably. Their data structures are unchanged; replacing graph
-adjacency lists with compressed sparse rows would measure a different algorithm.
+The initial migration moved Matmul (including worker-local pools) and Game of
+Life to `slice_pool`. Graph, Maze and Primes initially retained `reusable[]`
+because their setup/trie-building costs regressed measurably. Their data
+structures are unchanged; replacing graph adjacency lists with compressed sparse
+rows would measure a different algorithm.
 
 The scalar-pool users in `bench/goose/lru*.goose`, `bench/plb/lru` and
 `bench/plb/merkletrees` remain on `reusable`. They use compact pool-relative
@@ -151,10 +152,10 @@ node layout would confound the allocator comparison. These are compatibility
 gaps, not measured slot-pool slowdowns. `plb2` and `bddicken` contain no builtin
 pool users; the dedicated slot/slice microbenchmarks already cover both backends.
 
-The [final accepted-source run](pool_workloads_accepted_results.json) rebuilds
-after restoring Maze as well, and its source fingerprints match the committed
-migrations. It is noisier than the initial run on both sides. The six timed
-ratios are 1.012, 0.990, 1.008 and 1.027 for Matmul Single/T4/T8/T16, 1.000 for
+The [initial accepted-source run](pool_workloads_accepted_results.json) rebuilds
+after restoring Maze as well, and its source fingerprints match that initial
+migration's sources. It is noisier than the initial run on both sides. The six
+timed ratios are 1.012, 0.990, 1.008 and 1.027 for Matmul Single/T4/T8/T16, 1.000 for
 Game of Life, and 0.985 for kostya2 Matmul; their whole-process ratios span
 0.983–1.023. Ranges overlap and the small differences are not consistent across
 sessions. This supports migration within the observed variation, not a claim
@@ -170,6 +171,28 @@ changes keep LangArena's 30 main/global data-stack regions and 23 regions per
 worker unchanged. Python compilation and `git diff --check` pass. Compiler and
 stdlib sources are unchanged; the compiler regression suite was not rerun for
 these benchmark-only edits.
+
+## Remaining slice-pool migrations, 2026-10-19
+
+Graph, Maze and Primes now also use `slice_pool`; their measured overhead is
+accepted. The source changes preserve algorithms, allocation order, compact
+element layouts and checks. The archived results above describe the comparison
+and the initial conservative selection, not a requirement to keep the builtin.
+
+Across the three graph workloads, the measured extra preparation totals 318 ms;
+the three maze constructors add about 6 ms. A complete current LangArena run
+before this final migration took 30.05 seconds elapsed (22.27 seconds in its
+reported benchmark windows). Adding the measured 324 ms predicts 30.37 seconds,
+about 1.08% slower overall. This is a component-based estimate, not a full-suite
+A/B measurement; the suite excludes the extra setup from its reported score.
+
+Validation: all 50 LangArena workloads pass both the upstream small-input checks
+and the full-size suite in a fresh, uninstrumented native build. Primes passes
+its small-input checks and produces identical output to the builtin baseline.
+The file-tree sample also uses `slice_pool` for directory entries; its expected
+output is unchanged at O0/O2 with both native debug checks and TinyCC. The
+document-buffer example in `docs/design/owning_dynamic_data.md` compiles and runs
+with the library pool. Compiler and stdlib sources remain unchanged.
 
 ## Remaining optimization work
 
@@ -189,10 +212,10 @@ python bench/pool_workloads.py --exe build-root/Release/goose.exe --arena C:/W/L
 python bench/pool_workloads.py --exe build-root/Release/goose.exe --arena C:/W/LangArena --kostya C:/W/kostya-benchmarks --out build-root/pool-workloads-accepted --working-tree --construct-timer --only Matmul::Single Matmul::T4 Matmul::T8 Matmul::T16 Etc::GameOfLife kostya2/matmul
 ```
 
-The default mechanically migrates all eligible sources from `--baseline`, even
-if some current benchmark files deliberately retain the builtin. `--working-tree`
-instead measures the current tracked benchmark sources. `--build-only` prepares
-snapshots; `--reuse-builds` measures the saved binaries without rebuilding them.
+The default mechanically migrates all eligible sources from `--baseline`.
+`--working-tree` instead measures the current tracked benchmark sources.
+`--build-only` prepares snapshots; `--reuse-builds` measures the saved binaries
+without rebuilding them.
 Use a new `--out` for a new build and `--results` to retain a repeat's samples.
 `--only`, `--reps`, `--copies`, `--warmups` and `--cpus` select work and sampling.
 `--construct-timer` adds constructor timing alongside preparation and wall time.

@@ -449,15 +449,59 @@ construct directly into the selected existing slot or append destination.
 The existing trailing block mechanism alone does not supply this capability.
 
 The library's slot-selection algorithm can be ordinary code: assign `F()` into
-a recycled slot or `push(F())` for a new one. The immediate gap is that
-`CheckFunValCall` checks the block's tail without the receiving destination and
-returns a temporary copy. A literal linking to an existing node therefore has
-no proof that its self-relative offsets will be stored in the same region.
-Codegen already expands trailing blocks inline and can pass an lvalue
-destination to their tail. A focused first extension should propagate the
-construction destination through such blocks, recognize those results as
-constructed in place, and preserve that destination through assignment and
-push lowering. Ordinary named-function returns need not be generalized first.
+a recycled slot or `push(F())` for a new one. This requires general result
+construction support before adding the pool API; `map` and other higher-order
+functions must benefit from the same rules.
+
+The construction audit distinguishes three independent mechanisms:
+
+* Checking follows the call graph: caller, higher-order function, then the
+  block when its `F(...)` call is reached. `CheckCall` clears the enclosing
+  construction destination to keep arguments separate from the result.
+  `CheckFunValCall` checks the block's tail without an expected type, and the
+  receiving destination is not restored for it. Named-function bodies also
+  start without the caller's result destination. The order is correct; result
+  destination information does not flow through these boundaries.
+* `TempCopy` gives an expression temporary lifetime/provenance and removes its
+  identity as bindable storage. It is checker bookkeeping, not an instruction
+  to materialize and copy bytes. `BuiltWhereReceived` separately recognizes
+  named-call results as fresh construction, but does not recognize a trailing
+  block call, so even a self-contained literal with a `self` link is rejected.
+* The specified in-place guarantee applies to nonfixed values (§4.3).
+  `EmitFvCall` already builds a nonfixed struct directly on a supplied stack
+  destination. Fixed structs use C value temporaries when the destination is
+  not an lvalue; ordinary fixed elements of `push` are evaluated before the
+  slot is selected. A fixed literal holding relative references takes a
+  different, in-place path. Extending that path through calls requires both
+  checking and codegen support, independently of C optimizer copy elimination.
+
+Focused probes at Goose O0 and O2, with runtime debug checks for accepted cases,
+give the following results. Generated C was inspected for construction paths.
+
+| `map` initializer | Current behavior |
+|---|---|
+| Trailing block returning `Pair { a: it, b: it * 2 }`, both fields `i64` | Accepted; C struct temporaries followed by the element store. |
+| Trailing block returning `Row { id: it, text: str("item", it) }`, with `text: u8[]` | Accepted; the fields and text are built directly in the receiving array. |
+| Trailing block returning a fixed or variable-size struct with a self-relative `me: self` field | Rejected as an unsupported self-relative copy. |
+| Named function returning the equivalent self-linked struct | Accepted; fixed results use C values (internal offsets survive moving the whole value), variable-size results build directly at the receiver. |
+| Trailing block returning a struct with a resizable array field | Rejected by the existing prohibition on resizable array elements, before codegen. |
+
+A direct `items.push(Node { next: first, ... })` also succeeds where `first`
+names an existing element of `items`; the equivalent builder block and an
+ordinary named function returning that literal both fail the same-root check.
+This is distinct from the self-contained `self` case above: a link to an
+existing element needs the final destination's array identity.
+
+The implementation sequence is to make fresh block results participate in
+general construction checking, then carry result destination provenance
+separately from argument destinations through calls and forwarding. Preserve
+that destination in assignment and push lowering, including a destination
+return channel for fixed aggregates whose links depend on their final location.
+Named-call specialization must distinguish or constrain result destinations
+where their relationship to arguments affects validity. An unconditional
+removal of destination resets or of self-relative copy checks is insufficient:
+returning existing storage must retain the existing copy restrictions. Once
+these general cases work, implement `alloc_with` using ordinary library code.
 
 Preserve `self`, root checks, evaluation once and in order, construction conflict
 checking, lexical/nonlocal returns, and publication of a fresh slot only once it

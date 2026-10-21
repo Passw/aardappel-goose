@@ -21,6 +21,14 @@ that Graph was the particular benchmark that prompted it. `97d48286` later
 shared the neighbor search when a run cannot grow at the array's end; the
 library also includes that refinement.
 
+The tree-maintenance changes in `1ab1d26d` are also ported: subtree maxima follow
+the changed count, allocation reuses prefix maxima gathered during descent, and
+neighbor lookup only constructs another path when the next leaf touches the run.
+First-fit placement and coalescing are unchanged. The
+[2026-10-21 allocator comparison](slice_pool.md#tree-maintenance-port-2026-10-21)
+uses the improved builtin as its baseline. The earlier application timings
+below predate this update; a new Graph BFS/Primes subset is recorded at the end.
+
 The remaining differences are implementation costs: typed, checked accesses
 to metadata, initialized path scratch space, generic helper code, and typed
 relocation/defaulting loops instead of the runtime's bulk memory operations.
@@ -219,6 +227,40 @@ The Merkle-tree migration is now expressible with its existing layout, but at
 depth 16 measures 70.6 ms builtin versus 114.4 ms library (1.620x). It remains
 on `reusable` pending investigation of this larger gap. Source hashes and all
 individual samples are retained in the results file.
+
+## Tree-maintenance port follow-up, 2026-10-21
+
+The [refreshed application samples](pool_workloads_rescan_results.json) cover
+Graph BFS and Primes with `1ab1d26d` in the builtin runtime and its algorithm
+ported to the library (`d3eec1b3`). Both source variants use the same compiler
+executable and Clang flags. The baseline benchmark sources are still
+`d166ce4c`; the candidate is the current migrated source. This uses the existing
+three-binary-copy, nine-measurement protocol on CPUs 16–31, with one warmup per
+copy. All upstream checksums and paired outputs match.
+
+| Workload | Measurement | Improved builtin, ms | Ported library, ms | Ratio |
+|---|---|---:|---:|---:|
+| Graph::BFS | preparation | 1092.64 | 1245.80 | 1.140 |
+| Graph::BFS | timed work | 1700.00 | 1779.00 | 1.046 |
+| Graph::BFS | whole process | 3141.52 | 3398.98 | 1.082 |
+| kostya2/primes | timed work | 44.63 | 52.45 | 1.175 |
+| kostya2/primes | whole process | 76.26 | 88.51 | 1.161 |
+
+Graph preparation is 14.0% longer and the complete process 8.2% longer in this
+session. Its timed search does not allocate from the pool; the 4.6% search-time
+difference cannot be assigned to free-span maintenance. Primes' timed work is
+17.5% longer. Sample ranges overlap: Graph preparation is 966–1,232 ms builtin
+versus 1,141–1,347 ms library, and Primes' timed work is 40.4–52.0 ms versus
+43.8–56.1 ms. These are local observations with substantial spread, not precise
+predictions or a measurement of the complete LangArena suite.
+
+The interleaved allocator comparison isolates the port from the updated
+builtin baseline: the library itself takes 8–30% less time on fragmented reuse
+and 13–29% less on resize than its previous implementation. No application
+algorithm, layout, allocation order or safety check was changed to obtain this.
+
+Reproduce this application subset with the existing command below, adding
+`--working-tree --only Graph::BFS kostya2/primes` and choosing a fresh `--out`.
 
 ## Remaining optimization work
 

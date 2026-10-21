@@ -77,6 +77,75 @@ Negative cases cover foreign slices, invalid lengths, corrupted free-span
 indices, missing defaults, constness and lifetime violations. Double free and
 use of a logically freed run remain application errors, as with the builtin.
 
+## Tree-maintenance port, 2026-10-21
+
+The builtin baseline includes `1ab1d26d`, cherry-picked as `0ca6f7b6`.
+The library port is `d3eec1b3`. Both now update subtree maxima from the count
+that changed, reuse prefix maxima gathered during allocation, stop rescanning
+when another maximum is found, scan leaves front to back, and construct a
+neighbor path only when its first span touches the run. Merging two spans in
+one leaf needs one upward update. The library already shifted entries with
+loops. First-fit placement, tree layout, defaults and relocation are unchanged;
+ordinary bounds, slice and overflow checks remain enabled.
+
+The [complete measurements](slice_pool_rescan_results.json) retain the initial
+two-way run on CPU 2, the three-way run on CPU 24, and the longer resize repeats.
+The three-way run compares the improved builtin, the ported library, and the
+library before the port, all with the same compiler executable and native flags.
+It uses the same 2,000,000-operation matrix and 262,144 append allocations,
+three warmups and nine measured runs, with affinity `0x1000000`. Sources and
+compiler binaries are fingerprinted. Every comparison matched checksums.
+
+Timing spread in the short resize boundary cases was substantial: the initial
+three-way MSVC 8-byte row suggested a 6.5% regression against the old library,
+and clang's 128-byte row suggested 2.3%. Both boundary sizes were repeated with
+8,000,000 operations and the same three-way protocol; those repeats are used
+below. The original samples remain in the results file. CPU 24 is a different
+placement from the historical CPU-2 results, so absolute times across dates
+should not be treated as before/after measurements.
+
+In the table, **vs builtin** is ported library / improved builtin, and **vs old**
+is ported library / previous library. Below 1 means the ported library is faster.
+Both native compilers use O2, as does Goose.
+
+| Workload | Item bytes | Calls | Operations | MSVC vs builtin | MSVC vs old | clang vs builtin | clang vs old |
+|---|---:|---|---:|---:|---:|---:|---:|
+| fragmented | 8 | inline | 2M | 1.166 | 0.832 | 1.134 | 0.701 |
+| fragmented | 8 | boundary | 2M | 1.256 | 0.863 | 1.055 | 0.722 |
+| fragmented | 128 | inline | 2M | 1.246 | 0.905 | 1.090 | 0.797 |
+| fragmented | 128 | boundary | 2M | 1.284 | 0.921 | 1.222 | 0.797 |
+| resize | 8 | inline | 2M | 1.152 | 0.801 | 1.134 | 0.751 |
+| resize | 8 | boundary | 8M | 1.272 | 0.809 | 1.183 | 0.707 |
+| resize | 128 | inline | 2M | 1.208 | 0.872 | 1.154 | 0.811 |
+| resize | 128 | boundary | 8M | 1.311 | 0.858 | 1.236 | 0.819 |
+
+The ported library takes 8–30% less time on fragmented allocation and 13–29%
+less on resize than the previous library. Against the improved builtin, the
+remaining overhead is 5–28% and 13–31%, respectively. The
+[Graph BFS/Primes follow-up](pool_workloads.md#tree-maintenance-port-follow-up-2026-10-21)
+records two application workloads with the same updated runtime baseline.
+
+Append does not exercise the changed free-span maintenance. Its original and
+ported sources are included in the full matrix as controls; short-run timing
+differences there should not be attributed to this optimization. All three
+implementations still use five data-stack regions. Allocation records an extra
+24-entry array of prefix maxima in fixed native-stack scratch space.
+
+Validation passed the full Windows baseline: 1,243 frontend checks, 590 native
+O0/O2 checks, 162 runtime-debug programs, 728 TinyCC runs and 1,916 expected type
+errors, plus compiler/runtime checks, reference examples and samples. Fourteen
+focused O0/O2 checks also passed with compiler assertions and runtime checks.
+The port of the upstream 60,000-operation byte-pool model has identical output,
+including all 34,932 placements, and additionally audits exact subtree keys and
+maxima against the independent span model. Optional native modules, sanitizers
+and other operating systems were not exercised locally.
+
+To repeat the three-way measurement, pass `--previous-library` a snapshot of
+`stdlib/slice_pool.goose` from `0ca6f7b6`; use the ordinary matrix options above
+with `--affinity 0x1000000`. For the longer repeat also set
+`--n 8000000 --modes resize --calls boundary`. These local measurements characterize allocator
+workloads, not whole-program regressions.
+
 ## Windows x64 results, 2026-10-17
 
 AMD Ryzen 9 9950X3D; MSVC 19.51.36260 (toolset 14.51.36231) and clang-cl 22.1.3,
@@ -155,7 +224,7 @@ compiler also passed all ten positive slice-pool runs at O0/O2 with runtime debu
 checks. Optional audio/gfx/physics/UI modules and Linux/macOS/sanitizer runs were
 not exercised locally. O0 correctness is covered; this report measures O2 performance.
 
-Global component paths for index/pool-relative types, destination-aware slot
-construction and owner transfer to workers remain migration gaps. Worker-local
-owners work. The [migration plan](../docs/design/root_structs.md#separate-follow-up-reusable-pools-in-the-stdlib)
+Destination-aware slot construction and owner transfer to workers remain
+migration gaps. Global array-component paths and worker-local owners work. The
+[migration plan](../docs/design/root_structs.md#separate-follow-up-reusable-pools-in-the-stdlib)
 keeps builtin removal separate from documentation deprecation.

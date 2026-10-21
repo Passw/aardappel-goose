@@ -27,26 +27,38 @@ fn slice_pool_dropnode<T>(p: slice_pool<T>&, i: i64) {
     p.nodes[i].link = p.tree.chain;
     p.tree.chain = i;
 }
-fn slice_pool_max(node: slice_pool_node&, leaf: bool) -> i64 {
+fn slice_pool_max(node: slice_pool_node&, leaf: bool, stop: i64 = 9223372036854775807) -> i64 {
     let n = node.n;
     let offset = if leaf { 31 } else { 20 };
     assert(n >= 0 && n <= offset);
     var m = 0;
     let counts = node.data[offset..offset + n];
-    for count in counts { if count > m { m = count; } }
+    for count in counts {
+        if m >= stop { break; }
+        if count > m { m = count; }
+    }
     return m;
 }
-fn slice_pool_fix<T>(p: slice_pool<T>&, path: slice_pool_path&, from: i64) {
-    var l = from - 1;
-    while l >= 0 {
-        let parent .= p.nodes[path.node[l]];
-        let child .= p.nodes[path.node[l + 1]];
-        let k = path.pos[l];
+// One count changed from was to now; only a shrinking maximum needs a scan.
+// A split uses i64.max for was to rescan all entries that remain in the node.
+fn slice_pool_fix<T>(p: slice_pool<T>&, path: slice_pool_path&, from: i64,
+                     was: i64, now: i64) {
+    var l = from;
+    var old = was;
+    var count = now;
+    while l > 0 {
+        let parent .= p.nodes[path.node[l - 1]];
+        let child .= p.nodes[path.node[l]];
+        let k = path.pos[l - 1];
         let key = child.data[0];
-        let maximum = slice_pool_max(child, l + 1 == path.h);
-        if parent.data[k] == key && parent.data[20 + k] == maximum { return; }
+        let m = parent.data[20 + k];
+        let maximum = if count >= m { count } else if old < m { m }
+                      else { slice_pool_max(child, l == path.h, old) };
+        if parent.data[k] == key && m == maximum { return; }
         parent.data[k] = key;
         parent.data[20 + k] = maximum;
+        old = m;
+        count = maximum;
         l--;
     }
 }
@@ -64,26 +76,11 @@ fn slice_pool_find<T>(p: slice_pool<T>&, path: slice_pool_path&, idx: i64) -> i6
     }
     path.node[path.h] = i;
     let leaf .= p.nodes[i];
-    var lo = 0;
-    var hi = leaf.n;
-    while lo < hi {
-        let mid = (lo + hi) / 2;
-        if leaf.data[mid] <= idx { lo = mid + 1; } else { hi = mid; }
-    }
-    path.pos[path.h] = (lo - 1) as i8;
-    return lo - 1;
-}
-fn slice_pool_nextleaf<T>(p: slice_pool<T>&, path: slice_pool_path&) -> bool {
-    var l = path.h - 1;
-    while l >= 0 && path.pos[l] + 1 >= p.nodes[path.node[l]].n { l--; }
-    if l < 0 { return false; }
-    path.pos[l]++;
-    while l < path.h {
-        path.node[l + 1] = p.nodes[path.node[l]].data[40 + path.pos[l]];
-        path.pos[l + 1] = 0;
-        l++;
-    }
-    return true;
+    let keys = leaf.data[..leaf.n];
+    var k = 0;
+    while k < keys.len && keys[k] <= idx { k++; }
+    path.pos[path.h] = (k - 1) as i8;
+    return k - 1;
 }
 fn slice_pool_newroot<T>(p: slice_pool<T>&, a: i64, b: i64, leaf: bool) {
     let r = slice_pool_newnode(p);
@@ -134,9 +131,9 @@ fn slice_pool_addchild<T>(p: slice_pool<T>&, path: slice_pool_path&,
         target.data[20 + s] = maximum;
         target.data[40 + s] = c;
         target.n++;
-        if nn == 0 { slice_pool_fix(p, path, l); return; }
+        if nn == 0 { slice_pool_fix(p, path, l, 0, maximum); return; }
         if l == 0 { slice_pool_newroot(p, path.node[0], nn, false); return; }
-        slice_pool_fix(p, path, l);
+        slice_pool_fix(p, path, l, 9223372036854775807, 0);
         c = nn;
         isleaf = false;
         k = path.pos[l - 1] + 1;
@@ -168,28 +165,33 @@ fn slice_pool_insert<T>(p: slice_pool<T>&, path: slice_pool_path&, k: i64, idx: 
     target.data[s] = idx;
     target.data[31 + s] = cnt;
     target.n++;
-    if nn == 0 { slice_pool_fix(p, path, path.h); }
+    if nn == 0 { slice_pool_fix(p, path, path.h, 0, cnt); }
     else if path.h == 0 { slice_pool_newroot(p, path.node[0], nn, true); }
     else {
-        slice_pool_fix(p, path, path.h);
+        slice_pool_fix(p, path, path.h, 9223372036854775807, 0);
         slice_pool_addchild(p, path, path.h - 1, path.pos[path.h - 1] + 1, nn, true);
     }
 }
-fn slice_pool_delete<T>(p: slice_pool<T>&, path: slice_pool_path&, k: i64) {
-    let node .= p.nodes[path.node[path.h]];
+fn slice_pool_close(node: slice_pool_node&, k: i64) {
+    node.n--;
     var j = k;
-    while j + 1 < node.n {
+    while j < node.n {
         node.data[j] = node.data[j + 1];
         node.data[31 + j] = node.data[31 + j + 1];
         j++;
     }
-    node.n--;
-    if node.n > 0 || path.h == 0 { slice_pool_fix(p, path, path.h); return; }
+}
+fn slice_pool_delete<T>(p: slice_pool<T>&, path: slice_pool_path&, k: i64) {
+    let node .= p.nodes[path.node[path.h]];
+    let count = node.data[31 + k];
+    slice_pool_close(node, k);
+    if node.n > 0 || path.h == 0 { slice_pool_fix(p, path, path.h, count, 0); return; }
     slice_pool_dropnode(p, path.node[path.h]);
     var l = path.h - 1;
     loop {
         let parent .= p.nodes[path.node[l]];
         var e = path.pos[l];
+        let maximum = parent.data[20 + e];
         while e + 1 < parent.n {
             parent.data[e] = parent.data[e + 1];
             parent.data[20 + e] = parent.data[20 + e + 1];
@@ -197,7 +199,7 @@ fn slice_pool_delete<T>(p: slice_pool<T>&, path: slice_pool_path&, k: i64) {
             e++;
         }
         parent.n--;
-        if parent.n > 0 { slice_pool_fix(p, path, l); break; }
+        if parent.n > 0 { slice_pool_fix(p, path, l, maximum, 0); break; }
         slice_pool_dropnode(p, path.node[l]);
         l--;
     }
@@ -210,49 +212,129 @@ fn slice_pool_delete<T>(p: slice_pool<T>&, path: slice_pool_path&, k: i64) {
 }
 fn slice_pool_take<T>(p: slice_pool<T>&, path: slice_pool_path&, k: i64, cnt: i64) {
     let node .= p.nodes[path.node[path.h]];
-    if node.data[31 + k] <= cnt { slice_pool_delete(p, path, k); return; }
+    let count = node.data[31 + k];
+    if count <= cnt { slice_pool_delete(p, path, k); return; }
     node.data[k] += cnt;
-    node.data[31 + k] -= cnt;
-    slice_pool_fix(p, path, path.h);
+    node.data[31 + k] = count - cnt;
+    slice_pool_fix(p, path, path.h, count, count - cnt);
 }
 fn slice_pool_place<T>(p: slice_pool<T>&, cnt: i64) -> i64 {
     if cnt == 0 || p.nodes.len == 0 { return p.items.len; }
     var path = slice_pool_path { .. };
+    var before: i64[24] = [0; 24];
     path.h = p.tree.height;
     var i = p.tree.root;
-    let fit = path.h == 0 || slice_pool_max(p.nodes[i], false) >= cnt;
-    for l in path.h {
+    var l = 0;
+    var k = 0;
+    // The maxima before the first fit also serve the update on the way back.
+    while l < path.h {
         let node .= p.nodes[i];
-        var k = node.n - 1;
-        if fit { k = 0; while node.data[20 + k] < cnt { k++; } }
+        let counts = node.data[20..20 + node.n];
+        k = 0;
+        var m = 0;
+        while k < counts.len && counts[k] < cnt {
+            if counts[k] > m { m = counts[k]; }
+            k++;
+        }
+        if k == counts.len { break; }
         path.node[l] = i;
         path.pos[l] = k as i8;
+        before[l] = m;
         i = node.data[40 + k];
+        l++;
     }
-    path.node[path.h] = i;
-    let node .= p.nodes[i];
-    var k = 0;
-    if fit { while k < node.n && node.data[31 + k] < cnt { k++; } }
-    if !fit || k == node.n {
+    var fit = false;
+    if l == path.h {
+        let node .= p.nodes[i];
+        let counts = node.data[31..31 + node.n];
+        k = 0;
+        var m = 0;
+        while k < counts.len && counts[k] < cnt {
+            if counts[k] > m { m = counts[k]; }
+            k++;
+        }
+        before[l] = m;
+        fit = k < counts.len;
+    }
+    if !fit {
+        i = p.tree.root;
+        for level in path.h {
+            let node .= p.nodes[i];
+            path.node[level] = i;
+            path.pos[level] = (node.n - 1) as i8;
+            i = node.data[40 + node.n - 1];
+        }
+        path.node[path.h] = i;
+        let node .= p.nodes[i];
         k = node.n - 1;
         if k < 0 || node.data[k] + node.data[31 + k] != p.items.len { return p.items.len; }
+        let idx = node.data[k];
+        slice_pool_take(p, path, k, cnt);
+        return idx;
     }
+    path.node[path.h] = i;
+    path.pos[path.h] = k as i8;
+    let node .= p.nodes[i];
     let idx = node.data[k];
-    slice_pool_take(p, path, k, cnt);
+    var count = node.data[31 + k];
+    var now = 0;
+    var j = k;
+    if count > cnt {
+        node.data[k] = idx + cnt;
+        now = count - cnt;
+        node.data[31 + k] = now;
+        j++;
+    } else if node.n > 1 || path.h == 0 { slice_pool_close(node, k); }
+    else { slice_pool_delete(p, path, k); return idx; }
+    // Only the suffix after the path needs scanning when its maximum shrank.
+    l = path.h;
+    while l > 0 {
+        let parent .= p.nodes[path.node[l - 1]];
+        let child .= p.nodes[path.node[l]];
+        let e = path.pos[l - 1];
+        let maximum = parent.data[20 + e];
+        let key = child.data[0];
+        var nm = maximum;
+        if count == maximum {
+            nm = if before[l] > now { before[l] } else { now };
+            let offset = if l == path.h { 31 } else { 20 };
+            let counts = child.data[offset + j..offset + child.n];
+            for c in counts {
+                if nm >= count { break; }
+                if c > nm { nm = c; }
+            }
+        }
+        if parent.data[e] == key && nm == maximum { break; }
+        parent.data[e] = key;
+        parent.data[20 + e] = nm;
+        count = maximum;
+        now = nm;
+        j = e + 1;
+        l--;
+    }
     return idx;
 }
 fn slice_pool_neighbors<T>(p: slice_pool<T>&, path: slice_pool_path&,
-                           next: slice_pool_path&, idx: i64) -> slice_pool_near {
+                           next: slice_pool_path&, idx: i64, end: i64) -> slice_pool_near {
     let k = slice_pool_find(p, path, idx);
     let i = path.node[path.h];
     if k + 1 < p.nodes[i].n { return slice_pool_near { k, i, k + 1, false }; }
-    if path.h != 0 {
-        next = path;
-        if slice_pool_nextleaf(p, next) {
-            return slice_pool_near { k, next.node[next.h], 0, true };
-        }
+    var l = path.h - 1;
+    while l >= 0 && path.pos[l] + 1 >= p.nodes[path.node[l]].n { l--; }
+    // An inner key is its subtree's first span, so it proves adjacency
+    // before a second path is needed. Copy only the shared path prefix.
+    if l < 0 || p.nodes[path.node[l]].data[path.pos[l] + 1] != end {
+        return slice_pool_near { k, -1, -1, false };
     }
-    return slice_pool_near { k, -1, -1, false };
+    next.h = path.h;
+    for j in l + 1 { next.node[j] = path.node[j]; next.pos[j] = path.pos[j]; }
+    next.pos[l]++;
+    while l < next.h {
+        next.node[l + 1] = p.nodes[next.node[l]].data[40 + next.pos[l]];
+        next.pos[l + 1] = 0;
+        l++;
+    }
+    return slice_pool_near { k, next.node[next.h], 0, true };
 }
 fn slice_pool_release<T>(p: slice_pool<T>&, path: slice_pool_path&, next: slice_pool_path&,
                          near: slice_pool_near, idx: i64, cnt: i64) {
@@ -260,17 +342,19 @@ fn slice_pool_release<T>(p: slice_pool<T>&, path: slice_pool_path&, next: slice_
     let before = near.k >= 0 && node.data[near.k] + node.data[31 + near.k] == idx;
     let after = near.next_node >= 0 && idx + cnt == p.nodes[near.next_node].data[near.next_pos];
     if before {
-        node.data[31 + near.k] += cnt + (if after { p.nodes[near.next_node].data[31 + near.next_pos] } else { 0 });
-        slice_pool_fix(p, path, path.h);
-        if after {
-            if near.other_path { slice_pool_delete(p, next, near.next_pos); }
-            else { slice_pool_delete(p, path, near.next_pos); }
-        }
+        let count = node.data[31 + near.k];
+        let merged = count + cnt + (if after { p.nodes[near.next_node].data[31 + near.next_pos] } else { 0 });
+        node.data[31 + near.k] = merged;
+        // The merged count exceeds both old counts, so one fix covers both.
+        if after && !near.other_path { slice_pool_close(node, near.next_pos); }
+        slice_pool_fix(p, path, path.h, count, merged);
+        if after && near.other_path { slice_pool_delete(p, next, near.next_pos); }
     } else if after {
+        let count = p.nodes[near.next_node].data[31 + near.next_pos];
         p.nodes[near.next_node].data[near.next_pos] = idx;
-        p.nodes[near.next_node].data[31 + near.next_pos] += cnt;
-        if near.other_path { slice_pool_fix(p, next, next.h); }
-        else { slice_pool_fix(p, path, path.h); }
+        p.nodes[near.next_node].data[31 + near.next_pos] = count + cnt;
+        if near.other_path { slice_pool_fix(p, next, next.h, count, count + cnt); }
+        else { slice_pool_fix(p, path, path.h, count, count + cnt); }
     } else { slice_pool_insert(p, path, near.k + 1, idx, cnt); }
 }
 fn slice_pool_release_run<T>(p: slice_pool<T>&, idx: i64, cnt: i64) {
@@ -281,7 +365,7 @@ fn slice_pool_release_run<T>(p: slice_pool<T>&, idx: i64, cnt: i64) {
     }
     var path = slice_pool_path { .. };
     var next = slice_pool_path { .. };
-    let near = slice_pool_neighbors(p, path, next, idx);
+    let near = slice_pool_neighbors(p, path, next, idx, idx + cnt);
     slice_pool_release(p, path, next, near, idx, cnt);
 }
 fn slice_pool_regrow<T>(p: slice_pool<T>&, idx: i64, old: i64, cnt: i64) -> i64 {
@@ -291,8 +375,8 @@ fn slice_pool_regrow<T>(p: slice_pool<T>&, idx: i64, old: i64, cnt: i64) -> i64 
     }
     var path = slice_pool_path { .. };
     var next = slice_pool_path { .. };
-    let near = slice_pool_neighbors(p, path, next, idx);
     let end = idx + old;
+    let near = slice_pool_neighbors(p, path, next, idx, end);
     if near.next_node >= 0 {
         let node .= p.nodes[near.next_node];
         let k = near.next_pos;

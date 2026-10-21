@@ -1,4 +1,4 @@
-// Fixed-size, copyable values with stable slots and a LIFO freelist.
+// Fixed-size values with stable slots and a LIFO freelist.
 // A free marks a slot reusable; it does not destroy or remove its value.
 // References remain valid and observe the replacement when that slot is reused.
 // Like reusable, double frees are logical errors, not tracked occupancy checks.
@@ -22,6 +22,17 @@ fn alloc_index<T>(pool: slot_pool<T>&, value: T) -> i64 {
 fn alloc_ref<T>(pool: slot_pool<T>&, value: T) -> T& {
     let i = alloc_index(pool, value);
     return pool.items[i];
+}
+
+// Select the destination before calling F, then construct its result there.
+// This supports relative links whose offsets depend on the receiving slot.
+fn alloc_with<T, F>(pool: slot_pool<T>&) -> T& {
+    if pool.free_slots.len != 0 {
+        let i = pool.free_slots.pop();
+        pool.items[i] .= F();
+        return pool.items[i];
+    }
+    return pool.items.push(F());
 }
 
 fn free<T>(pool: slot_pool<T>&, i: i64) {

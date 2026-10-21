@@ -2435,8 +2435,12 @@ slots 0 1 0, pool length 3
 
 A pool may be a local or a global. Its `items` array never shrinks through
 the pool API; `items.len` includes free slots. Use `items` for ordinary array
-access, and pass the owner as `slot_pool<T>&`. Elements must be fixed-size and
-normally copyable. Do not edit its `free_slots` metadata or shrink `items`
+access, and pass the owner as `slot_pool<T>&`. Elements must be fixed-size.
+`alloc_index` and `alloc_ref` take normally copyable values. For fresh values
+with self-relative links or pool-relative `self`, use
+`pool.alloc_with() { Node { value: 1, me: self } }`: the builder runs once,
+directly in the chosen slot, and returns a reference to it.
+Do not edit its `free_slots` metadata or shrink `items`
 directly. See the [library contract](stdlib.md#slot_pool) for supported types
 and lifetime rules.
 

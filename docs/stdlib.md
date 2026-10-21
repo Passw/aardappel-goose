@@ -570,6 +570,7 @@ root struct slot_pool<T> {
 
 fn alloc_index<T>(pool: slot_pool<T>&, value: T) -> i64
 fn alloc_ref<T>(pool: slot_pool<T>&, value: T) -> T&
+fn alloc_with<T, F>(pool: slot_pool<T>&) -> T&
 fn free<T>(pool: slot_pool<T>&, i: i64)
 ```
 
@@ -589,13 +590,45 @@ fn main() {
 }
 ```
 
-Allocation requires a fixed-size, normally copyable `T`. No default value is
-needed: every allocation supplies a value. An allocation takes the most recently
+Elements must be fixed-size. No default value is needed: every allocation
+supplies a value. `alloc_index` and `alloc_ref` take normally copyable values.
+An allocation takes the most recently
 freed index, or appends when no slot is free. `alloc_index` returns its index;
 `alloc_ref` returns a reference to its value. For reference elements, `T&`
 collapses to `T` as usual; use `alloc_index` when the slot's identity is needed.
 Whole-element assignment replaces reference-valued elements without writing
 through them.
+
+`alloc_with` takes a zero-argument function or trailing block producing `T`.
+It selects the slot first, calls the builder once, and constructs the result
+directly there. This supports self-relative links and pool-relative `self`:
+
+```goose
+import slot_pool;
+struct Node { value: i64, me: Node&<u32>, next: Node&<u32>? }
+fn main() {
+    var nodes = slot_pool<Node> {};
+    let first .= nodes.alloc_with() { Node { value: 1, me: self } };
+    let second .= nodes.alloc_with() { Node { value: 2, me: self, next: first } };
+    let index = nodes.items.index_of(second);
+    nodes.free(index);
+    nodes.alloc_with() { Node { value: 3, me: self, next: first } };
+    assert(second.value == 3 && second.me .== second);
+}
+```
+
+Fresh results may come from other functions. Existing self-relative values
+still cannot be copied, and links must point within the receiving array.
+A trailing block infers its result type; for a reference-valued `T`, pass a
+named function explicitly returning that reference type.
+
+Unlike value arguments, the builder runs after a free index has been removed.
+A slot freed by the builder stays available for a later allocation. A fresh
+slot joins `items.len` only when construction completes; a nonlocal return
+before completion does not publish it. Reuse is not transactional: a nonlocal
+exit does not restore the popped index or undo initializer side effects.
+The usual construction rules reject conflicting growth of `items` during
+the builder. Bounds checks on a recycled index run before the builder.
 
 `free` checks `0 <= i < items.len` in every build, then records the index. It
 leaves the element initialized and does not shrink the array. Existing references
@@ -613,8 +646,8 @@ can be serialized separately, but its image omits the freelist.
 For a global `var pool`, compact links and index types can name its array:
 `Node&<u32 in pool.items>`, `u32 in pool.items`, and `u32 upto pool.items`.
 Pool-relative values with ordinary links are copyable and work with `alloc_ref`.
-Self-relative values, and `self` initializers that need the allocated slot as
-their destination, still need construction support beyond the value parameter.
+Self-relative values and `self` initializers use `alloc_with` to construct at
+the allocated slot.
 A root owner cannot be copied to a worker; worker-local pools are allowed.
 See [the migration plan](design/root_structs.md#separate-follow-up-reusable-pools-in-the-stdlib).
 

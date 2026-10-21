@@ -356,7 +356,7 @@ array operator overloading merely to disguise a container's `items` field.
 
 ## Separate follow-up: reusable pools in the stdlib
 
-`import slot_pool;` now provides the initial copyable-element slot allocator:
+`import slot_pool;` provides a fixed-size slot allocator:
 
 ```goose
 root struct slot_pool<T> {
@@ -374,8 +374,7 @@ with allocation, reference-returning allocation and checked free. Tests compare
 allocation traces, retained references and slot contents against the builtin.
 The [API reference](../stdlib.md#slot_pool) describes the supported element types
 and current boundaries; the [benchmark report](../../bench/slot_pool.md) compares
-equivalent native workloads. The compiler and existing reusable implementation
-are unchanged by this experiment.
+equivalent native workloads. The existing reusable implementation remains available unchanged.
 
 `stdlib/slice_pool.goose` packages its `items`, node array and tree state in one
 root owner. It implements the same augmented B+ tree as the builtin: first-fit
@@ -435,81 +434,37 @@ modules and sanitizer configurations were not run for this extension.
 
 ### Destination-aware library construction
 
-`EmitAlloc` currently selects a slot first, and then constructs literals that
-contain relative references in that slot. An ordinary `value: T` parameter has
-already received its value elsewhere. Probes confirmed that a self-relative
-node linking to an existing node typechecks with built-in `alloc_ref`, but
-fails when passed through an ordinary value parameter or through a current
-trailing builder block.
+`alloc_with<T, F>(pool: slot_pool<T>&) -> T&` is implemented using ordinary
+library control flow: remove a free index and assign `F()` into that slot,
+or return `pool.items.push(F())`. It calls the zero-argument builder once,
+after selecting the destination, and accepts fresh fixed-size aggregates
+with self-relative links or pool-relative `self`. Use `items.index_of` on
+the returned reference when an index is needed.
 
-Keep `alloc_ref(value)` for normally copyable values and investigate a builder
-API such as `pool.alloc_with() { Node { value: 2, next: first } }`. Extend the
-existing construction-destination machinery so a function-value initializer can
-construct directly into the selected existing slot or append destination.
-The existing trailing block mechanism alone does not supply this capability.
+The general compiler prerequisites landed on master separately; see
+[result construction](result_construction.md). Fresh results are distinct
+from copies, receiving roots flow through calls independently of argument
+slots, and fixed relative aggregates construct through destination pointers
+at every optimization level. Named functions, trailing blocks, forwarding,
+recursion and nonlocal returns share these rules. A block still infers its
+own result type; an explicit reference-result function can supply a
+reference-valued element. `alloc_ref(value)` and `alloc_index(value)` retain
+their ordinary argument evaluation and copy requirements.
 
-The library's slot-selection algorithm can be ordinary code: assign `F()` into
-a recycled slot or `push(F())` for a new one. This requires general result
-construction support before adding the pool API; `map` and other higher-order
-functions must benefit from the same rules.
+No default element or uninitialized published slot is needed. Appending
+publishes the new length only after construction finishes. A nonlocal exit
+leaves that length unchanged. Reuse removes the free index before running
+the builder and does not roll back that removal or initializer side effects
+on an early exit. A slot freed by the builder stays available for the next
+allocation. Invalid recycled indices fail bounds checks before the builder.
+Existing construction, lifetime, root and copy checks remain in force.
 
-The construction audit distinguishes three independent mechanisms:
-
-* Checking follows the call graph: caller, higher-order function, then the
-  block when its `F(...)` call is reached. `CheckCall` clears the enclosing
-  construction destination to keep arguments separate from the result.
-  `CheckFunValCall` checks the block's tail without an expected type, and the
-  receiving destination is not restored for it. Named-function bodies also
-  start without the caller's result destination. The order is correct; result
-  destination information does not flow through these boundaries.
-* `TempCopy` gives an expression temporary lifetime/provenance and removes its
-  identity as bindable storage. It is checker bookkeeping, not an instruction
-  to materialize and copy bytes. `BuiltWhereReceived` separately recognizes
-  named-call results as fresh construction, but does not recognize a trailing
-  block call, so even a self-contained literal with a `self` link is rejected.
-* The specified in-place guarantee applies to nonfixed values (§4.3).
-  `EmitFvCall` already builds a nonfixed struct directly on a supplied stack
-  destination. Fixed structs use C value temporaries when the destination is
-  not an lvalue; ordinary fixed elements of `push` are evaluated before the
-  slot is selected. A fixed literal holding relative references takes a
-  different, in-place path. Extending that path through calls requires both
-  checking and codegen support, independently of C optimizer copy elimination.
-
-Focused probes at Goose O0 and O2, with runtime debug checks for accepted cases,
-give the following results. Generated C was inspected for construction paths.
-
-| `map` initializer | Current behavior |
-|---|---|
-| Trailing block returning `Pair { a: it, b: it * 2 }`, both fields `i64` | Accepted; C struct temporaries followed by the element store. |
-| Trailing block returning `Row { id: it, text: str("item", it) }`, with `text: u8[]` | Accepted; the fields and text are built directly in the receiving array. |
-| Trailing block returning a fixed or variable-size struct with a self-relative `me: self` field | Rejected as an unsupported self-relative copy. |
-| Named function returning the equivalent self-linked struct | Accepted; fixed results use C values (internal offsets survive moving the whole value), variable-size results build directly at the receiver. |
-| Trailing block returning a struct with a resizable array field | Rejected by the existing prohibition on resizable array elements, before codegen. |
-
-A direct `items.push(Node { next: first, ... })` also succeeds where `first`
-names an existing element of `items`; the equivalent builder block and an
-ordinary named function returning that literal both fail the same-root check.
-This is distinct from the self-contained `self` case above: a link to an
-existing element needs the final destination's array identity.
-
-The implementation sequence is to make fresh block results participate in
-general construction checking, then carry result destination provenance
-separately from argument destinations through calls and forwarding. Preserve
-that destination in assignment and push lowering, including a destination
-return channel for fixed aggregates whose links depend on their final location.
-Named-call specialization must distinguish or constrain result destinations
-where their relationship to arguments affects validity. An unconditional
-removal of destination resets or of self-relative copy checks is insufficient:
-returning existing storage must retain the existing copy restrictions. Once
-these general cases work, implement `alloc_with` using ordinary library code.
-
-Preserve `self`, root checks, evaluation once and in order, construction conflict
-checking, lexical/nonlocal returns, and publication of a fresh slot only once it
-contains a valid value. Do not expose uninitialized slots or silently require
-every slot element to have a default. Use
-`test/storage/alloc_half_built.goose` as a compatibility baseline, including
-initializer side effects on the freelist. This is a general construction feature,
-not a new pool-specific privilege.
+The builder fixtures cover fresh and recycled slots, neighbour links,
+`self` in both relative forms, forwarding, explicit reference results,
+non-defaultable elements, nonlocal exits, and freelist side effects. The
+publication fixture mirrors `test/storage/alloc_half_built.goose` and
+produces the same output. Rejection fixtures cover copies, wrong roots on
+cached calls, short-lived local targets and conflicting item growth.
 
 ### Checked slice position
 

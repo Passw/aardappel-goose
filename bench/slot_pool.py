@@ -39,6 +39,14 @@ def source_for(template, backend, n, live, width, mode, calls, reuse_api="index"
         if template.count(old) != 1:
             raise RuntimeError("Reference reuse conversion no longer matches allocation")
         template = template.replace(old, new)
+    if backend == "slot_pool_builder":
+        def builder(m):
+            call = "p.alloc_with() { " + m[2] + " }"
+            return "p.items.index_of(" + call + ")" if m[1] == "index" else call
+        template, count = re.subn(r"p\.alloc_(index|ref)\((Item \{ [^\n]*? \})\)",
+                                  builder, template)
+        if count != 4:
+            raise RuntimeError("Builder conversion no longer matches all allocations")
     if backend == "reusable":
         replacements = {
             "import slot_pool;\n": "",
@@ -102,6 +110,8 @@ def main():
     ap.add_argument("--calls", nargs="+", choices=("inline", "boundary"), default=["inline", "boundary"])
     ap.add_argument("--reuse-api", choices=("index", "ref"), default="index",
                     help="reuse through alloc_index or alloc_ref plus index_of; append always uses alloc_ref")
+    ap.add_argument("--builders", action="store_true",
+                    help="also compare alloc_with against value-taking slot_pool and reusable")
     ap.add_argument("--out", type=Path, default=ROOT / "build" / "slot-pool-bench")
     args = ap.parse_args()
     if args.n <= 0 or args.grow_n <= 0 or args.n % 256 or args.grow_n % 256:
@@ -119,7 +129,9 @@ def main():
     results, checksums = [], {}
     metadata = dict(platform=platform.platform(), n=args.n, grow_n=args.grow_n,
                     live=args.live, reps=args.reps, warmups=args.warmups, executable=str(exe),
+                    compiler_sha256=hashlib.sha256(exe.read_bytes()).hexdigest(),
                     reuse_api=args.reuse_api,
+                    builders=args.builders,
                     slot_pool_sha256=hashlib.sha256((ROOT / "stdlib/slot_pool.goose").read_bytes()).hexdigest(),
                     workload_sha256=hashlib.sha256(template.encode("utf-8")).hexdigest(), runs=results)
     for mode in args.modes:
@@ -129,7 +141,10 @@ def main():
                 for calls in args.calls:
                     case = f"{mode}-{width * 8}B-O{level}-{calls}"
                     generated = {}
-                    for backend in ("reusable", "slot_pool"):
+                    backends = ["reusable", "slot_pool"]
+                    if args.builders:
+                        backends.append("slot_pool_builder")
+                    for backend in backends:
                         path = out / f"{case}-{backend}.goose"
                         source = source_for(template, backend, n, args.live, width, MODES[mode], calls,
                                             args.reuse_api)
@@ -145,9 +160,13 @@ def main():
                             binaries[backend], timings[backend] = binary, []
                             metrics[backend] = dict(metric, exe_bytes=binary.stat().st_size)
                         key = (mode, width)
-                        # Warm both, then alternate ordering to reduce timing drift.
+                        # Warm each, then rotate and reverse their order to reduce timing drift.
                         for rep in range(args.reps + args.warmups):
-                            order = list(binaries) if rep % 2 == 0 else list(reversed(binaries))
+                            order = list(binaries)
+                            offset = rep % len(order)
+                            order = order[offset:] + order[:offset]
+                            if rep % 2:
+                                order.reverse()
                             for backend in order:
                                 elapsed, checksum = run(binaries[backend])
                                 expected = checksums.setdefault(key, checksum)
@@ -161,10 +180,16 @@ def main():
                                    checksum=checksums[key].strip(), seconds=timings,
                                    median_seconds=medians,
                                    ratio=medians["slot_pool"] / medians["reusable"], metrics=metrics)
+                        if args.builders:
+                            row["builder_ratio"] = medians["slot_pool_builder"] / medians["reusable"]
+                            row["builder_vs_value"] = medians["slot_pool_builder"] / medians["slot_pool"]
                         results.append(row)
                         (out / "results.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
                         print(f"{case:32} {compiler.name:8} reusable={medians['reusable'] * 1000:8.2f} ms "
-                              f"slot_pool={medians['slot_pool'] * 1000:8.2f} ms ratio={row['ratio']:.3f}", flush=True)
+                              f"slot_pool={medians['slot_pool'] * 1000:8.2f} ms ratio={row['ratio']:.3f}"
+                              + (f" builder={medians['slot_pool_builder'] * 1000:8.2f} ms"
+                                 f" builder/value={row['builder_vs_value']:.3f}" if args.builders else ""),
+                              flush=True)
 
 
 if __name__ == "__main__":

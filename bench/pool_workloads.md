@@ -212,8 +212,8 @@ use `slot_pool` for their descriptors. The slot microbenchmark template is named
 `goose/slot_pool_bench.goose` so that it does not shadow the stdlib import from
 neighboring benchmark sources.
 
-The self-relative LRU variants and the sentinel-based PLB LRU variants still
-need destination-aware construction. They remain on the builtin.
+At this stage, the self-relative LRU variants and sentinel-based PLB LRU
+variants still needed destination-aware construction and stayed on the builtin.
 
 The [paired scalar results](root_component_pool_results.json) compare the
 previous committed source with each migration using the same compiler, Goose
@@ -224,7 +224,7 @@ LRU's full 8,000,000-operation workload measures 299.9 ms builtin versus
 This is one local session, not a claim of a portable speedup.
 
 The Merkle-tree migration is now expressible with its existing layout, but at
-depth 16 measures 70.6 ms builtin versus 114.4 ms library (1.620x). It remains
+depth 16 measures 70.6 ms builtin versus 114.4 ms library (1.620x). It stayed
 on `reusable` pending investigation of this larger gap. Source hashes and all
 individual samples are retained in the results file.
 
@@ -289,3 +289,47 @@ Use a new `--out` for a new build and `--results` to retain a repeat's samples.
 `--construct-timer` adds constructor timing alongside preparation and wall time.
 Choose CPU indices appropriate for the local machine. Logs, generated C, source
 snapshots and binaries stay under the output directory.
+
+## Builder construction migrations, 2026-10-21
+
+`alloc_with` removes the construction blocker for self-relative nodes and
+pool-relative `self`. The memory and linked-list samples now use `slot_pool`;
+the linked-list sentinel is constructed by a builder. The two self-relative
+LRU variants, both PLB LRU variants and Merkle trees also use the library.
+Compact element layouts, allocation/free order, algorithms and output are
+preserved. `items.index_of` obtains indices from builder results.
+
+```text
+python bench/slot_pool_users.py --exe build-root/Release/goose.exe --baseline f5cf82e0 --out build-root/alloc-with-final-users
+```
+
+The harness compares the committed builtin sources with the working tree,
+using one compiler executable, Goose O2 and Clang C O2. It retains generated
+sources/C, logs, sizes, stack counts and timing samples, checks every output,
+and alternates execution order. This run has two warmups and seven measured
+runs per version. LRU variants use their full 8,000,000-operation workload;
+PLB LRU uses `1000 3000000`, and Merkle trees use depth 17. Times cover the
+complete process. [Raw results](slot_pool_builder_users_results.json) include
+compiler/library/source fingerprints and the full matching outputs.
+
+| Workload | Reusable, ms | Slot pool, ms | Ratio |
+|---|---:|---:|---:|
+| lru_indices | 301.53 | 354.16 | 1.175x |
+| lru_nonopt | 307.27 | 301.34 | 0.981x |
+| plb_lru_1 | 123.98 | 124.43 | 1.004x |
+| plb_lru_2 | 57.84 | 57.06 | 0.987x |
+| merkletrees | 128.71 | 153.48 | 1.192x |
+
+The nonoptional LRU and PLB variants are close to parity in this session.
+`lru_indices` remains about 18% slower, and Merkle trees about 19% slower;
+these are measurable residual gaps, not claims of equivalence within noise.
+Earlier exploratory pairs put the former nearer 10%, so the precise size
+is sensitive to the session. The Merkle result improves on the earlier
+value-parameter migration, but that older 1.620x result used a different
+compiler and depth 16; it is not a controlled before/after optimization claim.
+A native-inlining experiment did not materially change the Merkle result
+and was not retained. Further optimization remains separate work.
+
+The unchanged sample outputs pass at O0/O2 with runtime checks. Full native
+and TinyCC baseline validation also passes. Existing builtin regression
+fixtures and differential tests continue testing `reusable` unchanged.

@@ -184,3 +184,47 @@ generated all 31 positive root/slot-pool fixtures at O0 and O2.
 
 Optional audio/gfx/physics/UI modules were not built; native worker tests ran,
 but TinyCC does not support them. Linux/macOS and sanitizer CI were not run here.
+
+## Builder allocation, 2026-10-21
+
+`alloc_with` constructs a function or trailing block's result in its selected
+slot. `--builders` adds it as a third implementation alongside `reusable` and
+the value-taking `slot_pool` API, using the same workload and checksum. With
+`--reuse-api ref`, all three return a reference and use `index_of` wherever
+an index is needed. Initial population and append allocations use the builder
+too. The three execution orders rotate and reverse between repetitions.
+
+```text
+python bench/slot_pool.py --exe build-root/Release/goose.exe --builders --reuse-api ref --n 64000000 --grow-n 4194304 --reps 7 --warmups 2 --calls boundary --out build-root/alloc-with-final-bench
+```
+
+[Raw results](slot_pool_builder_results.json) contain every timing sample,
+checksum, source/compiler fingerprint, generated-code size and stack report.
+This Windows run uses MSVC 19.51 and Clang, native C O2, seven measured runs
+and two warmups. The `exercise` call boundary survives in all variants.
+Times include initialization, checksum traversal, startup and teardown;
+these are allocation-heavy workloads without application work between calls.
+
+At Goose O2, builder/reusable medians range from **0.900x to 1.040x**.
+Against the value-taking library API they range from **0.977x to 1.197x**;
+the small-element reuse loops account for the largest difference. Ranges
+below span the two native compilers, not statistical confidence intervals.
+
+| Workload | Builder / reusable | Builder / value API |
+|---|---:|---:|
+| append, 8 bytes | 0.936–0.942x | 0.992–1.031x |
+| append, 128 bytes | 0.961–0.980x | 0.977–1.052x |
+| lifo, 8 bytes | 0.903–0.919x | 1.180–1.197x |
+| lifo, 128 bytes | 0.918–1.039x | 1.019–1.114x |
+| scattered, 8 bytes | 0.900–0.941x | 1.151–1.183x |
+| scattered, 128 bytes | 0.904–1.040x | 1.033–1.104x |
+
+Goose O0 retains more overhead: builder/reusable ranges from 0.949x to
+1.635x, despite native C optimization. Compared with the value API, the
+builder ranges from 0.673x to 1.103x there. These are measurements from one
+machine and session, not portable speedup guarantees. No bounds or lifetime
+checks were disabled. The full baseline, including native O0/O2, TinyCC,
+runtime-debug fixtures, bootstrap and documentation examples, passes.
+
+The [application comparison](pool_workloads.md#builder-construction-migrations-2026-10-21)
+exercises actual relative-link nodes as well as this copyable-value workload.

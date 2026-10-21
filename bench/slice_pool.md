@@ -34,6 +34,13 @@ the compiler executable, library and workload. `--out`, `--modes`, `--widths`,
 `--levels` and `--calls` select output and subsets of the matrix. The default
 Goose optimization level is O2; native C is always optimized at level 2.
 
+`--previous-library path/to/slice_pool.goose` adds an older library implementation
+to the same run. Its source and dependencies are isolated in a separate snapshot;
+the three binaries rotate through all six execution orders. All three must agree
+on checksums. `ratio` still compares the current library to the builtin, while
+`port_ratio` compares the current library to the older one. Both library versions
+use the same compiler and builtin runtime baseline.
+
 ## Workloads and validation
 
 Both implementations come from [one template](goose/slice_pool.goose). The

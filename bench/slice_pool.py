@@ -103,6 +103,8 @@ def main():
     ap.add_argument("--exe", required=True)
     ap.add_argument("--library", type=Path, default=ROOT / "stdlib/slice_pool.goose",
                     help="slice-pool source to snapshot alongside generated workloads")
+    ap.add_argument("--previous-library", type=Path,
+                    help="also measure an older library source in the same alternating run")
     ap.add_argument("--n", type=int, default=1_000_000, help="reuse allocations, multiple of 4")
     ap.add_argument("--grow-n", type=int, default=262_144, help="append allocations, multiple of 4")
     ap.add_argument("--live", type=int, default=4096)
@@ -132,6 +134,13 @@ def main():
     shutil.copyfile(ROOT / "bench/goose/rng.goose", out / "rng.goose")
     library = args.library.read_bytes()
     (out / "slice_pool.goose").write_bytes(library)
+    previous = None
+    if args.previous_library:
+        previous = args.previous_library.read_bytes()
+        folder = out / "previous"
+        folder.mkdir(exist_ok=True)
+        (folder / "slice_pool.goose").write_bytes(previous)
+        shutil.copyfile(ROOT / "bench/goose/rng.goose", folder / "rng.goose")
     template = (ROOT / "bench/goose/slice_pool.goose").read_text(encoding="utf-8")
     results, checksums = [], {}
     metadata = dict(platform=platform.platform(), n=args.n, grow_n=args.grow_n,
@@ -140,6 +149,8 @@ def main():
                     compiler_sha256=hashlib.sha256(exe.read_bytes()).hexdigest(),
                     slice_pool_sha256=hashlib.sha256(library).hexdigest(),
                     workload_sha256=hashlib.sha256(template.encode("utf-8")).hexdigest(), runs=results)
+    if previous is not None:
+        metadata["previous_slice_pool_sha256"] = hashlib.sha256(previous).hexdigest()
     for mode in args.modes:
         n = args.grow_n if mode == "append" else args.n
         for width in args.widths:
@@ -147,8 +158,12 @@ def main():
                 for calls in args.calls:
                     case = f"{mode}-{width * 8}B-O{level}-{calls}"
                     generated = {}
-                    for backend in ("reusable", "slice_pool"):
-                        path = out / f"{case}-{backend}.goose"
+                    backends = ["reusable", "slice_pool"]
+                    if previous is not None:
+                        backends.append("previous_slice_pool")
+                    for backend in backends:
+                        folder = out / "previous" if backend == "previous_slice_pool" else out
+                        path = folder / f"{case}-{backend}.goose"
                         source = source_for(template, backend, n, args.live, width, MODES[mode], calls)
                         generated[backend] = generate(exe, path, source, level, calls)
                     for compiler in compilers.values():
@@ -164,7 +179,12 @@ def main():
                         key = (mode, width)
                         # Warm both, then alternate ordering to reduce timing drift.
                         for rep in range(args.reps + args.warmups):
-                            order = list(binaries) if rep % 2 == 0 else list(reversed(binaries))
+                            order = list(binaries)
+                            if len(order) > 2:
+                                offset = rep % len(order)
+                                order = order[offset:] + order[:offset]
+                            if rep % 2:
+                                order.reverse()
                             for backend in order:
                                 elapsed, checksum = run(binaries[backend])
                                 expected = checksums.setdefault(key, checksum)
@@ -178,10 +198,15 @@ def main():
                                    checksum=checksums[key].strip(), seconds=timings,
                                    median_seconds=medians,
                                    ratio=medians["slice_pool"] / medians["reusable"], metrics=metrics)
+                        if previous is not None:
+                            row["port_ratio"] = medians["slice_pool"] / medians["previous_slice_pool"]
                         results.append(row)
                         (out / "results.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+                        control = (f" previous={medians['previous_slice_pool'] * 1000:.2f} ms "
+                                   f"port_ratio={row['port_ratio']:.3f}" if previous is not None else "")
                         print(f"{case:32} {compiler.name:8} reusable={medians['reusable'] * 1000:8.2f} ms "
-                              f"slice_pool={medians['slice_pool'] * 1000:8.2f} ms ratio={row['ratio']:.3f}", flush=True)
+                              f"slice_pool={medians['slice_pool'] * 1000:8.2f} ms ratio={row['ratio']:.3f}"
+                              f"{control}", flush=True)
 
 
 if __name__ == "__main__":

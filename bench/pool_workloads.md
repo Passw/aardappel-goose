@@ -321,10 +321,10 @@ compiler/library/source fingerprints and the full matching outputs.
 | merkletrees | 128.71 | 153.48 | 1.192x |
 
 The nonoptional LRU and PLB variants are close to parity in this session.
-`lru_indices` remains about 18% slower, and Merkle trees about 19% slower;
-these are measurable residual gaps, not claims of equivalence within noise.
-Earlier exploratory pairs put the former nearer 10%, so the precise size
-is sensitive to the session. The Merkle result improves on the earlier
+This unpinned run measured `lru_indices` about 18% slower and Merkle trees
+about 19% slower. The controlled follow-up below reproduces the Merkle gap,
+but does **not** reproduce an 18% LRU penalty; that figure should not be used
+as an estimate of the migration's cost. The Merkle result improves on the earlier
 value-parameter migration, but that older 1.620x result used a different
 compiler and depth 16; it is not a controlled before/after optimization claim.
 A native-inlining experiment did not materially change the Merkle result
@@ -333,3 +333,129 @@ and was not retained. Further optimization remains separate work.
 The unchanged sample outputs pass at O0/O2 with runtime checks. Full native
 and TinyCC baseline validation also passes. Existing builtin regression
 fixtures and differential tests continue testing `reusable` unchanged.
+
+## Explaining the scalar-pool gaps, 2026-10-22
+
+Neither workload uses the slice allocator's free-span tree. `slot_pool` and
+scalar `reusable` both use a LIFO stack of free indices, with the same node
+layout and allocation/free order here. Builders construct directly in the
+selected slot; there is no temporary-node copy to explain these differences.
+
+The [diagnostic harness](slot_pool_diagnose.py) reuses the **original binaries**
+for the two controls and builds experimental variants beside them. Every run
+must produce exactly the same output. It randomizes execution order with a
+fixed seed, uses three warmups and fifteen measured runs per variant, and
+sets CPU affinity inherited by the child processes. These experiments change
+neither the production library nor the compiler. The raw results retain
+individual samples and C/binary fingerprints, plus the original build metadata.
+
+### Merkle: known array identity is lost across helper calls
+
+The native assembly, not just the generated C, shows extra descriptor loads
+and metadata reloads in the pool version. A representative access is
+`pool.items.hdr->len` or `pool.free_slots.stk->top`, versus a direct global
+header/stack access in the builtin. After writing an element or pushing a
+free index, the library version reloads descriptor pointers and writes cached
+metadata back through them. Direct access gives the native compiler better
+knowledge of which storage these operations can affect.
+
+Goose already projects direct root-field accesses onto their independent
+array components, including through aliases exposed by Goose inlining.
+However, `Optimizer::TryInline` deliberately does not inline into recursive
+functions: doing so without adjusting stack assignment would violate its
+recursive-local allocation rules. Merkle's `make` and `free_tree` therefore
+call helpers whose root parameters still compile as descriptor references.
+Clang O2 does inline those helpers in the native code, but the descriptor
+indirections survive. There are no native `alloc_with`/`free` calls left to
+remove; forcing native inlining again is not the missing optimization.
+
+On CPUs 16–31 of the Ryzen 9 9950X3D, depth 17:
+
+| Variant | Whole process, ms | Relative to builtin |
+|---|---:|---:|
+| Original `reusable` binary | 124.17 | 1.000x |
+| Original `slot_pool` binary | 147.92 | 1.191x |
+| C helpers address the known global components directly; all checks retained | 127.95 | 1.030x |
+| Checked Goose allocation helper explicitly names the global pool | 131.67 | 1.060x |
+| Checked Goose allocation and free helpers explicitly name the global pool | 130.27 | 1.049x |
+| Original pool C with only recycled-index bounds checks removed | 146.94 | 1.183x |
+
+[Raw samples](slot_pool_diagnosis_results.json). The C specialization changes
+only how the helpers address array headers and stacks. The two Goose variants
+independently demonstrate the same opportunity with ordinary safe source: they
+duplicate the small checked helper bodies and refer to this program's global
+`pool` directly instead of accepting a root reference. They are experiments,
+not a suggested library API. Repeated exploratory comparisons also brought
+the direct-component variant within roughly 4–5% of the builtin.
+
+Thus most of the observed Merkle gap is recoverable without changing the
+algorithm or removing checks. This workload makes roughly 30 million small
+nodes at depth 17, so a little extra work per allocation/free has a visible
+whole-program cost. The experiment does not attribute every remaining
+percentage point: instruction scheduling, register use, checks and code layout
+also differ, and the timings are not an additive breakdown of their costs.
+
+**Difficulty:** a focused compiler optimization of moderate complexity, rather
+than an allocator redesign. Preserve a proven concrete root identity through
+calls, or specialize a helper for its known root, so its component accesses
+use the existing direct-array codegen. This does not require assuming there
+can be only one instance of `slot_pool<T>` in a program. Unknown or multiple
+possible roots must keep the generic path. A correct implementation must
+handle multiple callers/instances, recursive calls, captured references and
+builders that mutate the pool; stack-top/length caches must still be flushed
+and reloaded at the right boundaries. Simply enabling all Goose inlining
+inside recursive functions would bypass the reason for the current restriction.
+
+The unchecked row is an **unsafe diagnostic counterfactual**, never a proposed
+implementation: public `free_slots` can contain arbitrary indices. Its small
+effect suggests field privacy/check elimination is not the first lever for
+this workload. Privacy alone also would not supply the compiler with a proof
+that every recycled index is in bounds. Both existing implementations already
+check the index passed to `free`.
+
+### LRU: the earlier large penalty is not reproducible
+
+`lru_indices` already gets direct component accesses and cached array metadata
+in its main loop, so Merkle's descriptor issue does not explain it. There is a
+real code-generation difference: the migration uses
+`items.index_of(alloc_with(...))`, then indexes `items` again. Native assembly
+retains the pointer subtraction, signed division by 16 (shifts/correction,
+not a hardware divide), and the subsequent bounds check. The builtin returns
+the index directly.
+
+Two safe experiments address that difference: keep the builder's reference
+for `link_front`, or use a checked `alloc_index_with` helper which returns the
+selected index. Neither establishes a substantial speedup in the controlled
+runs. The original LRU binaries themselves are already close to parity under
+matched affinity; see the table and samples below. On CPUs 16–31 the sample
+ranges are broad (309–471 ms builtin, 309–372 ms pool), so a few percent of
+median difference is not evidence that one implementation is faster.
+
+| Variant | CPUs 16–31, ms (ratio) | CPUs 0–15, ms (ratio) |
+|---|---:|---:|
+| Original `reusable` binary | 339.03 (1.000x) | 143.25 (1.000x) |
+| Original `slot_pool` binary | 328.02 (0.968x) | 143.98 (1.005x) |
+| Keep the builder's reference | 328.20 (0.968x) | 143.97 (1.005x) |
+| Checked index-returning builder | 328.84 (0.970x) | 142.51 (0.995x) |
+| Remove only recycled-index checks (unsafe diagnostic) | 334.96 (0.988x) | 144.43 (1.008x) |
+
+Raw samples: [CPUs 16–31](slot_pool_diagnosis_results.json),
+[CPUs 0–15](slot_pool_diagnosis_cpus0_results.json).
+
+The machine has two markedly different CPU groups for this workload. The
+original run did not record affinity, so its precise cause cannot be recovered.
+Scheduling/cache placement and other session variation are confounders; the
+historical 18% number does not establish an 18% library overhead. There is no
+demonstrated large LRU gap here that needs a difficult optimization to close.
+
+Reproduce the controlled experiments from the saved application comparison:
+
+```text
+python bench/slot_pool_diagnose.py --exe build-root/Release/goose.exe --input build-root/alloc-with-final-users --out build-root/pool-diagnose-final --cpus 16-31
+python bench/slot_pool_diagnose.py --exe build-root/Release/goose.exe --input build-root/alloc-with-final-users --out build-root/pool-diagnose-final-cpus0 --cpus 0-15 --only lru_indices
+```
+
+Use CPU indices available on the test machine. To prepare the input directory,
+run `slot_pool_users.py` with the builder-migration command above. The diagnostic
+harness requires the same Goose executable, library contents and Clang version
+as that saved comparison; it fails if the expected source/C shapes change.

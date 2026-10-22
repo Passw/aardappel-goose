@@ -224,7 +224,7 @@ compiler also passed all ten positive slice-pool runs at O0/O2 with runtime debu
 checks. Optional audio/gfx/physics/UI modules and Linux/macOS/sanitizer runs were
 not exercised locally. O0 correctness is covered; this report measures O2 performance.
 
-Destination-aware slot construction and owner transfer to workers remain
-migration gaps. Global array-component paths and worker-local owners work. The
+Owner transfer to workers remains a migration gap. Destination-aware slot
+construction, global array-component paths and worker-local owners work. The
 [migration plan](../docs/design/root_structs.md#separate-follow-up-reusable-pools-in-the-stdlib)
 keeps builtin removal separate from documentation deprecation.

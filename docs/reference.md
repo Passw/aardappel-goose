@@ -1948,10 +1948,12 @@ sentinel. After that, no link is ever null, and every insert and remove is
 the same four stores:
 
 ```goose
-struct Node { val: i64, prev: Node&<u32 in pool>, next: Node&<u32 in pool> }
+import slot_pool;
 
-reusable var pool: Node[>..] = [];
-let head = pool.alloc_index(Node { val: 0, prev: self, next: self });   // the sentinel
+struct Node { val: i64, prev: Node&<u32 in pool.items>, next: Node&<u32 in pool.items> }
+
+var pool = slot_pool<Node> {};
+let head .= pool.alloc_with() { Node { val: 0, prev: self, next: self } };   // the sentinel
 
 fn insert_after(p: Node&, v: i64) -> Node& {
     let n .= pool.alloc_ref(Node { val: v, prev: p, next: p.next });
@@ -1963,20 +1965,20 @@ fn insert_after(p: Node&, v: i64) -> Node& {
 fn remove(n: Node&) {
     n.prev.next .= n.next;
     n.next.prev .= n.prev;
-    pool.free(pool.index_of(n));
+    pool.free(pool.items.index_of(n));
 }
 
-fn is_end(n: Node&) -> bool { n .== pool[head] }
+fn is_end(n: Node&) -> bool { n .== head }
 
 fn main() {
-    insert_after(pool[head], 1);
-    let two .= insert_after(pool[head].prev, 2);   // .=: `let two = …` would copy the node
-    insert_after(pool[head].prev, 3);
+    insert_after(head, 1);
+    let two .= insert_after(head.prev, 2);   // .=: `let two = …` would copy the node
+    insert_after(head.prev, 3);
     remove(two);
     var line: u8[>..] = [];
-    var n .= pool[head].next;
+    var n .= head.next;
     while !is_end(n) { format(line, n.val, " "); n .= n.next; }
-    print(line, "| ", pool.len, " slots, ", 8 + 4 + 4, " bytes a node");
+    print(line, "| ", pool.items.len, " slots, ", 8 + 4 + 4, " bytes a node");
 }
 ```
 
@@ -1991,12 +1993,12 @@ rejects.
 
 `self` is legal only in a struct or variant literal, and only for a
 non-optional relative-reference field whose pointee is the type being
-constructed. For an `in pool` field, the literal must also be built inside
-that pool (a `push`, an `alloc_ref`, an element store). The `reusable`
-pool and `alloc_ref` are explained in [section 14](#14-reusable-pools).
-This example retains the deprecated builtin because its sentinel needs `self`
-constructed in the allocated slot; `slot_pool.alloc_ref` currently takes an
-already-constructed value.
+constructed, and for an `in pool` field only in a literal built inside
+that array (a `push`, an element store, or a `slot_pool.alloc_with` builder).
+`alloc_with` selects the destination slot before calling the builder, so
+`self` points at that slot. `alloc_ref` accepts an already-constructed value;
+use it when no destination-dependent construction is needed. Both operations
+are explained in [section 14](#14-reusable-pools).
 
 ### Which form
 
@@ -2499,10 +2501,13 @@ semantics are specified in [spec §5.4](goose_spec.md#54-reusable-arrays-safe-al
 
 To migrate, import the appropriate module, declare `slot_pool<T> {}` or
 `slice_pool<T> {}`, update owner parameters to the corresponding root reference,
-and use `pool.items` for array operations. Allocation/free method names remain
-the same. Global index/pool-relative types naming `pool.items`, destination-aware
-slot construction, and owner transfer to workers are still migration gaps;
-keep the deprecated builtins for code requiring those features.
+and use `pool.items` for array operations. Global index/pool-relative types
+can name `pool.items`. For a value that needs construction in its receiving
+slot, replace `alloc_ref(value)` with `alloc_with() { value }`; obtain its index
+with `pool.items.index_of` if needed. Ordinary value allocations and slice
+operations keep their method names. Owner transfer to workers remains a
+migration gap; keep the deprecated builtins for code requiring worker snapshots.
+Worker-local library pools already work.
 
 ---
 

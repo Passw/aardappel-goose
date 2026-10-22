@@ -4,6 +4,15 @@
 `slice_pool<T>` for new code. The builtins remain comparison baselines here;
 their removal is separate from migrating these benchmarks.
 
+Current migration status: the scalar workloads use `slot_pool`, and the slice
+workloads use `slice_pool` except for LangArena's `Etc::CacheSimulation`.
+That migration remains outstanding. Worker snapshots also remain unsupported
+by root owners. The dated sections below preserve earlier decisions and
+measurements; the latest scalar results are in
+[Known global roots implemented](#known-global-roots-implemented-2026-10-22),
+and the latest Graph/Primes results are in the
+[tree-maintenance follow-up](#tree-maintenance-port-follow-up-2026-10-21).
+
 ## Allocation policy
 
 `slice_pool` uses the same augmented B+ tree as `reusable[]`, not the old

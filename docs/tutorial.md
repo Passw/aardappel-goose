@@ -925,28 +925,27 @@ allocation header per node. A thousand random inserts give:
 
 ### `self`, and sentinels
 
-The linked-list example below retains the **deprecated `reusable` builtin**:
-its sentinel needs `self` constructed in the allocated slot, which the library
-pool's value parameter cannot yet provide. Use
-[`slot_pool<T>`](stdlib.md#slot_pool) and [`slice_pool<T>`](stdlib.md#slice_pool)
-for new code that does not need the [remaining migration features](design/root_structs.md#separate-follow-up-reusable-pools-in-the-stdlib).
-
 A non-optional relative reference has no null, so a structure whose links
 point back at itself could never be constructed, because there is nothing to
 point at yet. `self` means "the value this literal is constructing", and it
 is legal only as the whole initializer of such a field:
 
 ```goose
-struct Node { val: i64, prev: Node&<u32 in pool>, next: Node&<u32 in pool> }
+import slot_pool;
 
-reusable var pool: Node[>..] = [];
-let head = pool.alloc_index(Node { val: 0, prev: self, next: self });
+struct Node { val: i64, prev: Node&<u32 in pool.items>, next: Node&<u32 in pool.items> }
+
+var pool = slot_pool<Node> {};
+let head .= pool.alloc_with() { Node { val: 0, prev: self, next: self } };
 ```
 
 This is the sentinel of a circular doubly-linked list, allocated before
 `main` runs. Because the sentinel exists, no link in the list is ever null.
 Every insert and remove is the same four stores, with no special cases, and
 every link load is a plain add rather than an add plus a null test.
+`alloc_with` selects the slot before running its builder, so `self` names
+the node in its final location. The ordinary `alloc_ref` value argument
+suffices for nodes whose links already name existing elements:
 
 ```goose
 fn insert_after(p: Node&, v: i64) -> Node& {
@@ -959,10 +958,10 @@ fn insert_after(p: Node&, v: i64) -> Node& {
 fn remove(n: Node&) {
     n.prev.next .= n.next;
     n.next.prev .= n.prev;
-    pool.free(pool.index_of(n));
+    pool.free(pool.items.index_of(n));
 }
 
-fn is_end(n: Node&) -> bool { n .== pool[head] }
+fn is_end(n: Node&) -> bool { n .== head }
 ```
 
 A node is 8 + 4 + 4 = 16 bytes, compared with a `std::list` node plus a map
@@ -1092,8 +1091,10 @@ expose their backing array as `pool.items`; its length includes freed storage.
 
 **`reusable` and `reusable[]` are deprecated** in favor of these library types.
 They remain available for existing code; removal is a later step.
-[`26_file_tree`](../samples/26_file_tree.goose) retains the builtins because
-its global pool-relative links need the remaining migration support.
+[`26_file_tree`](../samples/26_file_tree.goose) combines both library pool
+types with compact links naming their global `items` components. Copying
+a whole pool into a worker still requires the deprecated builtins;
+worker-local library pools are supported.
 
 ---
 

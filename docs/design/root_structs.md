@@ -270,10 +270,13 @@ Do not promise zero overhead based only on an inlined benchmark. Keep existing
 For initial root support, report material regressions explicitly and fix basic
 integration with existing optimizations before calling the feature complete.
 
-Two more ambitious optimizations are deferred:
+Known global owners now have an additional optimization; more general call
+lowering remains deferred:
 
-1. **Known-owner specialization.** Where whole-program provenance proves exactly
-   one possible instance, compile access directly to that instance's fields.
+1. **Known-owner specialization.** Where all incoming calls prove exactly
+   one global owner, accesses use that owner's fields and component caches.
+   See [the implemented scope](#known-root-identity-across-function-calls).
+   Preserving local-owner identity across emitted call boundaries remains future work.
    A unique type is not proof of a unique live instance: repeated declarations,
    recursion, worker instances, aliases and reentrancy must be considered.
 2. **Field-by-field lowering.** Treat an owner as component locals and pass the
@@ -283,8 +286,8 @@ Two more ambitious optimizations are deferred:
    locations. Materialize a descriptor when addressability or reference storage
    requires one. Measure register pressure, argument count and code growth.
 
-Keep the v1 language contract independent of either ABI strategy so that these
-can be introduced without changing user code.
+Keep the v1 language contract independent of these ABI strategies so that
+further optimizations do not require user code changes.
 
 ### Initial native measurement
 
@@ -382,7 +385,8 @@ placement, coalescing, tail reuse and overlap-safe relocation. Differential test
 compare positions, retained views and every backing element under allocation,
 free and resize traces. See its [API](../stdlib.md#slice_pool) and
 [benchmark report](../../bench/slice_pool.md). Both pool types require fixed-size
-elements; not every builtin use can migrate yet.
+elements. Worker snapshots remain a compatibility gap; global component paths
+and destination-aware slot construction are implemented.
 
 Preserve the existing safety contract: all published elements remain valid
 typed values, a free merely marks storage reusable, and a stale reference may
@@ -541,9 +545,9 @@ comparison, not a replacement for Goose's existing reuse semantics.
 
 Deprecate `reusable` and `reusable[]` in documentation and recommend the library
 types for new code. Keep the syntax, diagnostics and runtime behavior available
-for existing code. Removal is a later change, after destination-aware slot
-construction and worker transfer have a reviewed migration path. Global
-component index/relative types and worker-local library pools already work. Continue
+for existing code. Global component index/relative types, destination-aware slot
+construction and worker-local library pools are implemented. Removal is a later
+change, after worker transfer has a reviewed migration path. Continue
 measuring application workloads as well as allocation-heavy microbenchmarks;
 small regressions alone do not require retaining a language-level allocator.
 
@@ -560,8 +564,9 @@ small regressions alone do not require retaining a language-level allocator.
   initialization, iteration, N=0, and practical reservation limits. This does
   not imply resizable or runtime-length arrays of owners. Do not choose an
   arbitrary small-N language limit before evaluating costs.
-* **Known-owner specialization and field-by-field call lowering.** As above;
-  preserve addressability and alias semantics while minimizing indirections.
+* **Local-owner specialization and field-by-field call lowering.** Extend the
+  implemented global-owner optimization while preserving addressability and
+  alias semantics and minimizing indirections.
 * **Owning factory results.** Construct directly into several caller-provided
   destinations, without copying a descriptor and presenting it as a move.
   General copying, reassignment and moving need separate semantics.

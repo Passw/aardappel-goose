@@ -164,9 +164,11 @@ could still insert a bad one. Eliminating the bounds check requires a compiler
 proof or a separately justified trusted implementation. The measured improvement
 needs neither change, and the public-freelist corruption tests still abort.
 
-This comparison is an initial scalar-pool result. Destination-aware construction
-for self-relative values, index types naming global components, worker snapshots
-and slice pools remain separate work. The complete functional baseline also
+This comparison records the initial scalar-pool implementation. Destination-aware
+construction and global component index types are now supported; see the
+[builder comparison](#builder-allocation-2026-10-21) below. Slice pools have a
+[separate report](slice_pool.md). Worker snapshots remain future work. The
+functional baseline for this initial comparison also
 tests reference-valued and non-defaultable elements, aliases, global and worker-local
 owners, invalid frees, lifetime rejection, and deterministic differential traces
 against `reusable`.

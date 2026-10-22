@@ -466,6 +466,48 @@ publication fixture mirrors `test/storage/alloc_half_built.goose` and
 produces the same output. Rejection fixtures cover copies, wrong roots on
 cached calls, short-lived local targets and conflicting item growth.
 
+### Known root identity across function calls
+
+Codegen preserves a root parameter's identity when every incoming call names
+the same global owner. This is independent of `in pool.items` types: ordinary
+root structs and pools of ordinary values qualify too. After Goose optimization,
+an analysis follows direct global references, immutable uncaptured aliases and
+parameter forwarding. Recursive edges participate in the same fixed point;
+no body is emitted until all its callers agree. Conflicting or unknown inputs
+retain the generic descriptor path. The analysis neither changes typechecking
+nor creates a specialization per owner.
+
+In a qualifying helper, the parameter aliases the global's existing component
+locations. Multiple parameters naming that owner share its top/length caches,
+including with direct global accesses in the body. The global effects propagate
+through callers so nested calls and builder callbacks flush/reload the relevant
+caches. A separately supplied array reference can alias an owner component and
+still takes the conservative uncached path. Return-destination caching also
+continues to account for the helper's access to global storage.
+
+The call interface and argument evaluation stay intact. All index, lifetime,
+construction and shrink checks remain in force. In particular, knowing the
+owner does not make the contents of its public freelist trustworthy. No
+singleton assumption about a root type is needed: several instances are valid,
+and a helper shared by different owners retains its descriptors.
+
+This extension specializes accesses to proven **global** owners. Local owners
+still benefit from existing Goose inlining/alias projection; preserving their
+identity across an emitted function boundary would need a different calling
+interface or additional specialization. Mutable, captured, stored, optional
+and otherwise opaque root references are conservative, as are implicit formatting
+and tag-dispatch entry points. The restriction on Goose inlining into recursive
+functions remains unchanged.
+
+Validation covers recursive forwarding, a recursive helper used by multiple
+globals, independent local pools, aliasing owner parameters, separately passed
+components, nested-call cache synchronization, self-relative builders, freelist
+mutation inside a builder and corrupt indices failing before builder effects.
+The full Windows baseline passes with native O0/O2, TinyCC, runtime-debug,
+compiler assertions in focused fixtures, bootstrap and C-shape checks. See the
+[application measurements](../../bench/pool_workloads.md) and
+[microbenchmarks](../../bench/slot_pool.md) for performance and its limits.
+
 ### Checked slice position
 
 Builtin `free_slice`/`realloc_slice` can check alignment and complete containment
@@ -591,5 +633,6 @@ existing array caches. They do not establish a performance guarantee for every
 aliasing pattern or a migration result for reusable pools. Implementation steps
 1–4 are complete. Step 5 now has both pool implementations, differential tests
 and repeatable benchmarks. Checked slice positions and length validation are
-implemented, as are global component paths. Destination-aware slot construction
-and worker transfer remain, alongside the explicit v2 candidates.
+implemented, as are global component paths, destination-aware slot construction
+and known global owner propagation. Worker transfer remains, alongside the
+explicit v2 candidates.

@@ -21,6 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import toolchain as tc
+from slot_pool_users import pin_cpus
 
 MODES = {"append": 0, "lifo": 1, "scattered": 2}
 
@@ -113,11 +114,13 @@ def main():
     ap.add_argument("--builders", action="store_true",
                     help="also compare alloc_with against value-taking slot_pool and reusable")
     ap.add_argument("--out", type=Path, default=ROOT / "build" / "slot-pool-bench")
+    ap.add_argument("--cpus", help="CPU indices/ranges inherited by every benchmark process")
     args = ap.parse_args()
     if args.n <= 0 or args.grow_n <= 0 or args.n % 256 or args.grow_n % 256:
         ap.error("--n and --grow-n must be positive multiples of 256")
     if args.live < 64 or args.live & (args.live - 1) or args.reps < 1 or args.warmups < 1:
         ap.error("--live must be a power of two >= 64; --reps and --warmups must be positive")
+    pin_cpus(args.cpus)
     exe = tc.find_goose(args.exe)
     compilers = tc.find_ccs()
     if not compilers:
@@ -130,7 +133,7 @@ def main():
     metadata = dict(platform=platform.platform(), n=args.n, grow_n=args.grow_n,
                     live=args.live, reps=args.reps, warmups=args.warmups, executable=str(exe),
                     compiler_sha256=hashlib.sha256(exe.read_bytes()).hexdigest(),
-                    reuse_api=args.reuse_api,
+                    reuse_api=args.reuse_api, cpus=args.cpus,
                     builders=args.builders,
                     slot_pool_sha256=hashlib.sha256((ROOT / "stdlib/slot_pool.goose").read_bytes()).hexdigest(),
                     workload_sha256=hashlib.sha256(template.encode("utf-8")).hexdigest(), runs=results)

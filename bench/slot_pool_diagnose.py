@@ -6,9 +6,7 @@ the compiler, library or benchmarks. The unchecked variant is diagnostic only.
 Generated-C substitutions deliberately assert the expected snapshot shape.
 """
 import argparse
-import ctypes
 import json
-import os
 from pathlib import Path
 import random
 import re
@@ -20,27 +18,6 @@ import slot_pool_users as users
 
 ROOT = users.ROOT
 WORKLOADS = {"lru_indices": ("lru_indices", []), "merkletrees": ("1", ["17"])}
-
-
-def pin_cpus(spec):
-    if not spec:
-        return
-    cpus = set()
-    for part in spec.split(","):
-        lo, _, hi = part.partition("-")
-        cpus.update(range(int(lo), int(hi or lo) + 1))
-    if not cpus or min(cpus) < 0:
-        raise ValueError("expected CPU indices or ranges, such as 16-31")
-    if os.name == "nt":
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        k32.GetCurrentProcess.restype = ctypes.c_void_p
-        mask = sum(1 << c for c in cpus)
-        if mask >= 1 << (ctypes.sizeof(ctypes.c_size_t) * 8):
-            raise ValueError("CPU mask exceeds the current processor group")
-        if not k32.SetProcessAffinityMask(ctypes.c_void_p(k32.GetCurrentProcess()), ctypes.c_size_t(mask)):
-            raise ctypes.WinError(ctypes.get_last_error())
-    else:
-        os.sched_setaffinity(0, cpus)
 
 
 def emit(exe, folder, stem, source):
@@ -141,7 +118,7 @@ def main():
     compiler = users.tc.find_ccs().get("clang")
     if compiler is None:
         raise SystemExit("Clang is required")
-    pin_cpus(args.cpus)
+    users.pin_cpus(args.cpus)
     source_dir, out = args.input.resolve(), args.out.resolve()
     if source_dir == out or source_dir in out.parents or out in source_dir.parents:
         ap.error("input and output directories must be separate")

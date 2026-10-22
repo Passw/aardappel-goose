@@ -212,12 +212,12 @@ below span the two native compilers, not statistical confidence intervals.
 
 | Workload | Builder / reusable | Builder / value API |
 |---|---:|---:|
-| append, 8 bytes | 0.936–0.942x | 0.992–1.031x |
-| append, 128 bytes | 0.961–0.980x | 0.977–1.052x |
-| lifo, 8 bytes | 0.903–0.919x | 1.180–1.197x |
-| lifo, 128 bytes | 0.918–1.039x | 1.019–1.114x |
-| scattered, 8 bytes | 0.900–0.941x | 1.151–1.183x |
-| scattered, 128 bytes | 0.904–1.040x | 1.033–1.104x |
+| append, 8 bytes | 0.936â€“0.942x | 0.992â€“1.031x |
+| append, 128 bytes | 0.961â€“0.980x | 0.977â€“1.052x |
+| lifo, 8 bytes | 0.903â€“0.919x | 1.180â€“1.197x |
+| lifo, 128 bytes | 0.918â€“1.039x | 1.019â€“1.114x |
+| scattered, 8 bytes | 0.900â€“0.941x | 1.151â€“1.183x |
+| scattered, 128 bytes | 0.904â€“1.040x | 1.033â€“1.104x |
 
 Goose O0 retains more overhead: builder/reusable ranges from 0.949x to
 1.635x, despite native C optimization. Compared with the value API, the
@@ -228,3 +228,43 @@ runtime-debug fixtures, bootstrap and documentation examples, passes.
 
 The [application comparison](pool_workloads.md#builder-construction-migrations-2026-10-21)
 exercises actual relative-link nodes as well as this copyable-value workload.
+
+## Known global root follow-up, 2026-10-22
+
+The compiler can now preserve a root parameter's proven global owner through
+calls, including recursion, and use its normal component caches. The
+[application comparison](pool_workloads.md#known-global-roots-implemented-2026-10-22)
+measures the resulting Merkle improvement. This microbenchmark deliberately
+uses **two local pools through the same `exercise` helper**. Those parameters
+keep the generic descriptor interface, so this run checks that path rather
+than measuring the new global-owner optimization.
+
+```text
+python bench/slot_pool.py --exe build-root/Release/goose.exe --builders --reuse-api ref --n 64000000 --grow-n 4194304 --reps 7 --warmups 2 --calls boundary --cpus 16-31 --out build-root/known-roots-micro
+```
+
+[Raw results](slot_pool_known_root_results.json) cover all 24 combinations of
+workload, element size, Goose optimization level and native compiler, with
+matching checksums for the builtin, value API and builder. The `exercise`
+boundary remains preserved. All 36 generated C files match the previous
+builder run after excluding the generated-file comment and diagnostic
+source-path strings. The raw result also lists these comparisons. No generated
+operations change on this generic path.
+
+At Goose O2, builder/reusable medians range from **0.892x to 1.096x**:
+
+| Workload | Builder / reusable, across native compilers |
+|---|---:|
+| append, 8 bytes | 0.912â€“0.935x |
+| append, 128 bytes | 0.965â€“1.096x |
+| lifo, 8 bytes | 0.904â€“0.923x |
+| lifo, 128 bytes | 0.924â€“1.031x |
+| scattered, 8 bytes | 0.892â€“0.939x |
+| scattered, 128 bytes | 0.904â€“1.038x |
+
+Builder/value ratios range from 0.981x to 1.224x at O2. Goose O0 still has
+larger allocation-only overhead: builder/reusable is 1.016â€“1.687x and
+builder/value is 0.666â€“1.093x. These residual costs on the generic path are
+not addressed by proving a single global owner. The previous run was unpinned;
+timing differences between the two sessions must not be attributed to this
+compiler change, given their equivalent generated C.

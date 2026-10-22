@@ -459,3 +459,63 @@ Use CPU indices available on the test machine. To prepare the input directory,
 run `slot_pool_users.py` with the builder-migration command above. The diagnostic
 harness requires the same Goose executable, library contents and Clang version
 as that saved comparison; it fails if the expected source/C shapes change.
+
+## Known global roots implemented, 2026-10-22
+
+`50bfcb6c` preserves a root parameter's concrete global owner when all incoming
+calls agree, including recursive forwarding. `1dfda8ed` lets these aliases use
+the existing component caches and call synchronization. Helpers shared by
+different owners or passed opaque references keep their descriptors. This
+changes codegen, not the library's allocation policy or safety checks; see the
+[implementation scope](../docs/design/root_structs.md#known-root-identity-across-function-calls).
+
+The comparison now runs three versions in rotating/reversed order: builtin
+and pool sources compiled with the new compiler, plus the saved pool binary
+from before these changes. It verifies identical source/library fingerprints
+for the two pool versions and checks every output. This run uses CPUs 16–31,
+Clang C O2, Goose O2, three warmups and fifteen measured repetitions. Inputs
+are the same as the builder migration above.
+
+| Workload | Builtin, ms | Previous pool, ms | New pool, ms | New / builtin |
+|---|---:|---:|---:|---:|
+| lru_indices | 342.89 | 348.47 | 302.79 | 0.883x |
+| lru_nonopt | 419.38 | 437.89 | 454.38 | 1.083x |
+| plb_lru_1 | 119.29 | 119.40 | 119.79 | 1.004x |
+| plb_lru_2 | 52.18 | 52.30 | 52.39 | 1.004x |
+| merkletrees | 125.92 | 149.50 | 131.06 | 1.041x |
+
+[Raw results](slot_pool_known_root_users_results.json) include all samples and
+the old/new binary fingerprints. Merkle's pool time falls **12.3%**, reducing
+its gap against the builtin from **18.7% to 4.1%**. A separate seven-sample
+[repeat](slot_pool_known_root_repeat_results.json) measured 125.80 ms builtin,
+149.16 ms previous pool and 130.34 ms new pool: **3.6%** above the builtin and
+**12.6%** less time than the previous pool. Its generated allocator/free helpers
+now access the global components directly, with ordinary checked indexing and
+cached metadata. Its stack count remains five regions.
+
+All four LRU programs generate exactly the same C as before after excluding
+the generated-file comment and diagnostic source-path strings. Their timing
+differences therefore do not establish compiler improvements or regressions:
+run conditions and binary layout are confounders for these timings. PLB LRU
+stays near parity. Merkle is the
+application in this set whose generated operations change.
+
+```text
+python bench/slot_pool_users.py --exe build-root/Release/goose.exe --baseline f5cf82e0 --previous build-root/alloc-with-final-users --out build-root/known-roots-users --cpus 16-31 --reps 15 --warmups 3
+python bench/slot_pool_users.py --exe build-root/Release/goose.exe --baseline f5cf82e0 --previous build-root/alloc-with-final-users --out build-root/known-roots-users-repeat --cpus 16-31 --reps 7 --warmups 2 --only merkletrees
+```
+
+`--previous` requires saved binaries from the earlier run, compiled with the
+same native compiler/settings and unchanged Goose/library sources; only the
+Goose compiler executable is expected to differ. `--cpus` is also available
+without a previous build. Choose a fresh output directory and suitable CPU
+indices for the machine.
+
+The complete Windows baseline passes: 664 native O0/O2 checks, 174 runtime-debug
+checks, 803 TinyCC runs and 2,017 expected type errors, plus bootstrap, samples,
+reference examples and generated-C cache checks. The four new identity/cache/
+builder/corruption fixtures also pass with the assertion-enabled compiler and
+Clang C O2, at both Goose O0 and O2 with runtime checks. Optional native modules
+and other platforms were not tested here. The
+[microbenchmark rerun](slot_pool.md#known-global-root-follow-up-2026-10-22)
+covers the generic path with multiple local pool instances.

@@ -1800,6 +1800,27 @@ def main():
         else:
             r.ok("root alias caches")
     r.show_task(root_alias_caches)
+    # A known owner survives out-of-line calls and recursive forwarding;
+    # merged, mutable and local owners still use the descriptor interface.
+    def root_call_identity():
+        for opt in (0, 2):
+            cfile = gendir / f"root_call_identity-O{opt}-shapes.c"
+            code, out, err = r.goose(f"-O{opt}", "-o", cfile, HERE / "codegen" / "root_call_identity.goose")
+            if code != 0:
+                r.fail(f"root call identity O{opt}", out + err)
+                continue
+            text = cfile.read_text()
+            def bodies(name):
+                return re.findall(rf"^static [^\n;]*\b{name}_g\w*\([^\n]*\) \{{\n(.*?)^\}}\n",
+                                  text, re.MULTILINE | re.DOTALL)
+            direct = bodies("known") + bodies("descend")
+            generic = bodies("shared") + bodies("shared_recursive") + bodies("dynamic")
+            if (len(direct) < 2 or not all("gs_component_one_g_" in b and "hdr->" not in b for b in direct)
+                    or len(generic) < 3 or not all("hdr->" in b for b in generic)):
+                r.fail(f"root call identity O{opt}", "\n".join(direct + generic))
+            else:
+                r.ok(f"root call identity O{opt}")
+    r.show_task(root_call_identity)
     # Fields nothing can move are member stores, not stores through a
     # pointer taken first (StableDest).
     def member_stores():

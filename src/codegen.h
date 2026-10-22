@@ -843,6 +843,10 @@ struct CodeGen {
     unordered_map<const VarDef *, Node *> aliaspath;
     set<const VarDef *> aliasbound;          // The aliases whose binding has been emitted.
     set<const VarDef *> capturedvars;        // Every live specialization's free variables.
+    // Root parameters whose incoming calls all name one global owner. Locals,
+    // mutable/captured references and merged owners retain their descriptors.
+    unordered_map<const VarDef *, VarDef *> knownrootparams;
+    void FindKnownRootParams();
     void FindRefAliases(FnSpec *sp);
     const VarDef *AliasTarget(VarDef *d, Node *init, Node *&path);
     static bool HandedRef(Node *n);
@@ -1463,6 +1467,7 @@ struct CodeGen {
         CollectSpecs();
         for (auto sp : livespecs)
             for (auto fv : sinfo[sp].freevars) capturedvars.insert(fv);
+        FindKnownRootParams();
         // Zero means "no long-distance return in flight", which is also the
         // state every propagating function's ordinary exit leaves behind.
         if (!fromids.empty()) data += "static GS_TLS int32_t gs_rf;\n";

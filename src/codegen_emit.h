@@ -154,6 +154,8 @@ inline Node *CodeGen::FieldChainRoot(Node *n, bool typed) {
 // Every binding of the body that AliasTarget accepts, in source order, so
 // that an alias of an alias resolves to the first one's target.
 inline void CodeGen::FindRefAliases(FnSpec *sp) {
+    for (auto p : sp->params)
+        if (auto it = knownrootparams.find(p); it != knownrootparams.end()) refalias[p] = it->second;
     auto bind = [&](VarDef *d, Node *init) {
         Node *path = nullptr;
         auto t = AliasTarget(d, init, path);

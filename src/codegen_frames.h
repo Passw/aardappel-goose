@@ -96,6 +96,107 @@ inline string CodeGen::SyncReach(FnSpec *callee, const vector<string> &args,
     return s;
 }
 
+// Meet all incoming root arguments after optimization. The three states are
+// unseen, one global owner, and unknown/multiple owners. Starting recursive
+// edges unseen lets an entry call supply an identity; a different back edge
+// weakens the whole cycle before any body is emitted.
+inline void CodeGen::FindKnownRootParams() {
+    struct Root {
+        VarDef *owner = nullptr;
+        bool unknown = false;
+    };
+    unordered_map<const VarDef *, Root> roots;
+    vector<pair<VarDef *, Node *>> bindings;
+    vector<pair<FnSpec *, FnSpec *>> edges;
+    auto rootref = [&](const VarDef *v) {
+        return v && v->type && v->type->kind == TY_REF &&
+               !v->type->ref->optional && IsRoot(v->type->ref->sub);
+    };
+    auto admit = [&](VarDef *v) {
+        if (!rootref(v)) return false;
+        auto &r = roots[v];
+        r.unknown |= v->isvar || v->isglobal || v->captured || capturedvars.count(v);
+        return true;
+    };
+    auto bind = [&](VarDef *v, Node *arg) {
+        if (admit(v)) bindings.push_back({ v, arg });
+    };
+    auto opaque = [&](FnSpec *sp) {
+        if (sp) for (auto p : sp->params) if (admit(p)) roots[p].unknown = true;
+    };
+    for (auto sp : livespecs) {
+        for (auto p : sp->params) admit(p);
+        if (sp->sf->isexport || sp->sf->isthread) opaque(sp);
+    }
+    auto scan = [&](Node *body, FnSpec *caller) {
+        function<void(Node *)> walk = [&](Node *n) {
+            if (!n) return;
+            if (auto vd = Is<VarDecl>(n))
+                for (size_t i = 0; i < vd->defs.size(); i++)
+                    bind(vd->defs[i], vd->defs.size() == vd->inits.size() ? vd->inits[i] : nullptr);
+            if (auto c = Is<Call>(n)) {
+                auto edge = [&](FnSpec *k) {
+                    if (caller && k && k != caller && sinfo.count(k)) edges.push_back({ caller, k });
+                };
+                if (c->spec) {
+                    edge(c->spec);
+                    if (c->builtin < 0 && c->dispatch.empty()) {
+                        auto an = CallArgNodes(c, c->spec->params.size());
+                        for (size_t i = 0; i < c->spec->params.size(); i++)
+                            bind(c->spec->params[i], i < an.size() ? an[i] : nullptr);
+                    } else opaque(c->spec);
+                }
+                for (auto k : c->dispatch) { edge(k); opaque(k); }
+                for (auto [t, k] : c->fmtspecs) { edge(k); opaque(k); }
+                for (size_t i = 0; i < c->fvparams.size(); i++)
+                    bind(c->fvparams[i], i < c->args.size() ? c->args[i] : nullptr);
+            }
+            RunChildren(n, walk);
+        };
+        walk(body);
+    };
+    for (auto sp : livespecs) scan(sp->body, sp);
+    for (auto g : ast.globals) scan(g, nullptr);
+    auto value = [&](Node *arg) -> Root {
+        if (auto u = Is<Unary>(arg); u && u->op == T_BITAND) arg = u->child;
+        auto id = Is<Ident>(arg);
+        auto v = id ? id->vdef : nullptr;
+        if (v && v->isglobal && v->type && IsRoot(v->type)) return { v, false };
+        auto it = roots.find(v);
+        return it != roots.end() ? it->second : Root { nullptr, true };
+    };
+    for (auto changed = true; changed;) {
+        changed = false;
+        for (auto [v, arg] : bindings) {
+            auto &to = roots[v];
+            if (to.unknown) continue;
+            auto from = value(arg);
+            if (from.unknown || (from.owner && to.owner && from.owner != to.owner)) {
+                to.unknown = true;
+                changed = true;
+            } else if (from.owner && !to.owner) {
+                to.owner = from.owner;
+                changed = true;
+            }
+        }
+    }
+    for (auto sp : livespecs)
+        for (auto p : sp->params) {
+            auto it = roots.find(p);
+            if (it == roots.end() || it->second.unknown || !it->second.owner) continue;
+            knownrootparams[p] = it->second.owner;
+            // Direct accesses also count as global effects for the caller's
+            // cache synchronization, including calls that only forward p.
+            sinfo[sp].globals.insert(it->second.owner);
+        }
+    for (auto changed = true; changed;) {
+        changed = false;
+        for (auto [caller, callee] : edges)
+            for (auto g : sinfo[callee].globals)
+                changed |= sinfo[caller].globals.insert(g).second;
+    }
+}
+
 inline void CodeGen::CollectSpecs() {
     for (auto sp : ast.fnspecs)
         if (sp->live && sp->body) livespecs.push_back(sp);

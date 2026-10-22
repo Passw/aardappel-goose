@@ -189,7 +189,8 @@ inline void CodeGen::FindRefAliases(FnSpec *sp) {
 //    other kind can be dereferenced right here, and might be one. Taking one
 //    of a variable does not count: that value is only handed on;
 //  * the globals' dedicated stacks, which a parameter or a captured
-//    reference may also be rooted at: there must be none;
+//    reference may also be rooted at: any such parameter must be a proven
+//    alias of its global owner, and there must be no captured reference;
 //  * its captured resizables' stacks (`<fv>_stk`), likewise: a parameter or
 //    a captured reference might be rooted at the same variable; and one
 //    that is its function's named result lives at that function's
@@ -215,8 +216,10 @@ inline void CodeGen::PlanTopClasses(FnSpec *sp) {
                                    (IsResz(v->type->ref->sub) || IsRoot(v->type->ref->sub))));
     };
     auto fatparam = false, fatfv = false, capresz = false, globals = false, unknown = false;
-    for (size_t i = 0; i < sp->params.size(); i++)
-        if (carries(sp->params[i]) || IsPoolParam(sp, i)) fatparam = true;
+    for (size_t i = 0; i < sp->params.size(); i++) {
+        if (knownrootparams.count(sp->params[i])) globals = true;
+        else if (carries(sp->params[i]) || IsPoolParam(sp, i)) fatparam = true;
+    }
     for (auto fv : fvs) {
         if (fv->reusable || carries(fv)) fatfv = true;
         else if (fv->type && (IsResz(fv->type) || IsRoot(fv->type))) capresz = true;

@@ -1821,6 +1821,38 @@ def main():
             else:
                 r.ok(f"root call identity O{opt}")
     r.show_task(root_call_identity)
+    def root_call_caches():
+        cfile = gendir / "root_call_caches-shapes.c"
+        code, out, err = r.goose("-O2", "-o", cfile, HERE / "codegen" / "root_call_caches.goose")
+        if code != 0:
+            r.fail("root call caches", out + err)
+            return
+        text = cfile.read_text()
+        def body(name):
+            match = re.search(rf"^static [^\n;]*\b{name}_g\w*\([^\n]*\) \{{\n(.*?)^\}}\n",
+                              text, re.MULTILINE | re.DOTALL)
+            return match[1] if match else ""
+        ok = True
+        for name in ("pair", "direct"):
+            prefix, _, loop = body(name).partition("for (")
+            ok &= len(re.findall(r"uint8_t \*\w+ = .*->top;", prefix)) == 1
+            ok &= len(re.findall(r"int64_t \w+ = .*\.len;", prefix)) == 1
+            ok &= "GS_GL" not in loop.partition("\n    }")[0]
+        outer = body("outer")
+        before, call, after = outer.partition(" = inner_g(")
+        ok &= bool(call)
+        for component in (0, 1):
+            stack = rf"\(&GS_GL->gs_gstk_gs_component_state_g_{component}\)->top"
+            length = rf"GS_GL->gs_component_state_g_{component}\.len"
+            ok &= bool(re.search(stack + r" = \w+;", before) and re.search(length + r" = \w+;", before))
+            ok &= bool(re.search(r"\w+ = " + stack + ";", after) and re.search(r"\w+ = " + length + ";", after))
+        mixed = body("mixed").partition("for (")[2].partition("\n    }")[0]
+        ok &= "gs_gstk_gs_component_state_g_0)->top" in mixed and ".stk->top" in mixed
+        if ok:
+            r.ok("root call caches")
+        else:
+            r.fail("root call caches", "\n".join(body(n) for n in ("pair", "outer", "mixed", "direct")))
+    r.show_task(root_call_caches)
     # Fields nothing can move are member stores, not stores through a
     # pointer taken first (StableDest).
     def member_stores():

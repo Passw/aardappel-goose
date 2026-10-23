@@ -39,7 +39,29 @@ fn alloc_with<T, F>(pool: slot_pool<T>&) -> T& {
     return pool.items.push(F());
 }
 
+fn alloc_index_with<T, F>(pool: slot_pool<T>&) -> i64 {
+    if pool.free_slots.len != 0 {
+        let i = pool.free_slots.pop();
+        pool.items[i] .= F();
+        return i;
+    }
+    pool.items.push(F());
+    return pool.items.len - 1;
+}
+
 fn free<T>(pool: slot_pool<T>&, i: i64) {
     if i < 0 || i >= pool.items.len { abort("slot_pool.free: index out of bounds"); }
     pool.free_slots.push(i);
+}
+
+fn free_ref<T>(pool: slot_pool<T>&, value: T&) {
+    free(pool, pool.items.index_of(value));
+}
+
+// Retain storage and values, but make every slot available again, in index
+// order. Existing references observe replacements just as with individual frees.
+fn recycle_all<T>(pool: slot_pool<T>&) {
+    pool.free_slots.clear();
+    var i = pool.items.len;
+    while i > 0 { i--; pool.free_slots.push(i); }
 }

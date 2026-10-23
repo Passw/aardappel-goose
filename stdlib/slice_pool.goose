@@ -68,3 +68,20 @@ fn realloc_slice<T>(p: slice_pool<T>&, s: T[:], n: i64) -> T[:] {
     else if idx + s.len != p.items.len { to = slice_pool_detail::regrow(p.nodes, p.tree, p.items.len, idx, s.len, count); }
     return slice_pool_detail::finish(p, to, count, idx, s);
 }
+
+// Retain values and backing storage; every element belongs to one free run.
+fn recycle_all<T>(p: slice_pool<T>&) {
+    if p.nodes.len == 0 && p.items.len == 0 { return; }
+    while p.nodes.len < 2 { p.nodes.push(slice_pool_detail::node { .. }); }
+    p.tree = slice_pool_detail::tree { root: 1, height: 0, chain: 0 };
+    p.nodes[1] = slice_pool_detail::node { .. };
+    if p.items.len != 0 {
+        p.nodes[1].n = 1;
+        p.nodes[1].data[31] = p.items.len;
+    }
+    for i in 2..p.nodes.len {
+        p.nodes[i].n = 0;
+        p.nodes[i].link = p.tree.chain;
+        p.tree.chain = i;
+    }
+}

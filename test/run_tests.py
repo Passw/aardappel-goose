@@ -119,6 +119,11 @@ def debug_fixture(f, line):
     return f.stem == "codegen_exec" or "runtime-debug" in line
 
 
+def fixture_levels(levels, line):
+    """Selected optimizer regressions exercise the default O1 path too."""
+    return tuple(sorted(set(levels) | {"1"})) if "all-levels" in line else levels
+
+
 def has_bce_annotations(f):
     return bool(re.search(r"//\s*bce:(?:elide|keep)\b", f.read_text(encoding="utf-8")))
 
@@ -760,11 +765,11 @@ class Runner:
         program in-process: --jit with -o."""
         name = f.stem
         res.modules = modules = native_modules(f, self.native)
-        levels = self.levels if self.cc else ()
+        levels = fixture_levels(self.levels, line) if self.cc else ()
         # A native module's fixture runs in-process only where the package
         # is compiled in; the compiler would otherwise build the package.
         available = all(self.native[m] for m in modules)
-        res.jitlevels = jitlevels = ("0", "2") if self.jit and available and \
+        res.jitlevels = jitlevels = fixture_levels(("0", "2"), line) if self.jit and available and \
             "no-jit" not in line else ()
         gen, cfiles = res.gen, res.c
         with self.into(res.cgen):
@@ -819,7 +824,7 @@ class Runner:
         judges the program's TinyCC runs."""
         name = f.stem
         modules = res.modules
-        levels = self.levels if self.cc else ()
+        levels = fixture_levels(self.levels, first_line(f)) if self.cc else ()
         jitlevels, gen, cfiles = res.jitlevels, res.gen, res.c
         if levels:
             with self.into(res.cgen):

@@ -236,9 +236,15 @@ inline void CodeGen::PlanTopClasses(FnSpec *sp) {
     ibs(sp->body);
     function<void(Node *)> walk = [&](Node *n) {
         if (!n) return;
-        if (n->exprtype && IsFatRef(n->exprtype)) {
+        if (n->exprtype && (IsFatRef(n->exprtype) ||
+            (n->exprtype->kind == TY_REF && IsRoot(n->exprtype->ref->sub)))) {
             if (!Is<Ident>(n) && !HandedRef(n)) unknown = true;
         }
+        // A projected reference is used here, without a call boundary to
+        // synchronize its owner's cached components (including inlined &x).
+        if (auto d = Is<Dot>(n); d && d->obj->exprtype &&
+            d->obj->exprtype->kind == TY_REF && IsRoot(d->obj->exprtype->ref->sub) &&
+            !Is<Ident>(d->obj)) unknown = true;
         if (auto r = Is<Return>(n); r && !localexits.count(r->target)) farreturn = true;
         NodeVars(n, [&](const VarDef *v) {
             if (!v) return;
@@ -346,6 +352,11 @@ inline bool CodeGen::RefTopsOk(FnSpec *sp, bool farreturn) {
     };
     function<void(Node *)> walk = [&](Node *n) {
         if (!n || !ok) return;
+        if (auto d = Is<Dot>(n); d && d->obj->exprtype &&
+            rootref(d->obj->exprtype) && !Is<Ident>(d->obj)) {
+            ok = false;
+            return;
+        }
         if (n->exprtype && (IsFatRef(n->exprtype) || rootref(n->exprtype))) {
             // A reference taken of a variable is only handed on: to a call,
             // which syncs everything it is handed a stack in, or to an alias.

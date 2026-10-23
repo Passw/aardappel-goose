@@ -132,12 +132,21 @@ def main():
     shutil.copyfile(ROOT / "bench/goose/rng.goose", out / "rng.goose")
     library = args.library.read_bytes()
     (out / "slice_pool.goose").write_bytes(library)
+    def snapshot_internal(source, destination):
+        internal = source.parent / "slice_pool_internal.goose"
+        if b"import slice_pool_internal;" not in source.read_bytes():
+            return None
+        data = internal.read_bytes()
+        (destination / internal.name).write_bytes(data)
+        return hashlib.sha256(data).hexdigest()
+    internal_hash = snapshot_internal(args.library, out)
     previous = None
     if args.previous_library:
         previous = args.previous_library.read_bytes()
         folder = out / "previous"
         folder.mkdir(exist_ok=True)
         (folder / "slice_pool.goose").write_bytes(previous)
+        previous_internal_hash = snapshot_internal(args.previous_library, folder)
         shutil.copyfile(ROOT / "bench/goose/rng.goose", folder / "rng.goose")
     template = (ROOT / "bench/goose/slice_pool.goose").read_text(encoding="utf-8")
     results, checksums = [], {}
@@ -147,9 +156,11 @@ def main():
                     compiler_sha256=hashlib.sha256(exe.read_bytes()).hexdigest(),
                     compilers=args.compilers,
                     slice_pool_sha256=hashlib.sha256(library).hexdigest(),
+                    internal_sha256=internal_hash,
                     workload_sha256=hashlib.sha256(template.encode("utf-8")).hexdigest(), runs=results)
     if previous is not None:
         metadata["previous_slice_pool_sha256"] = hashlib.sha256(previous).hexdigest()
+        metadata["previous_internal_sha256"] = previous_internal_hash
     for mode in args.modes:
         n = args.grow_n if mode == "append" else args.n
         for width in args.widths:

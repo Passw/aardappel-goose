@@ -120,7 +120,11 @@ struct BaseCaseInliner {
             // A callee that may `return ... from` us would leave the frame
             // the copy is in, the caller's, rather than the callee's.
             auto bad = [&](FnSpec *k) {
-                return k && (k->incycle || k->sf->isrec || k->needs.count(o.curspec));
+                // Separate callback and nested-function bodies still name
+                // the recursive frame's variables. Copying this call does
+                // not copy those bodies into the base-case bindings.
+                return k && (k->incycle || k->sf->isrec || k->needs.count(o.curspec) ||
+                             !k->fnvals.empty() || k->lexparent);
             };
             if (bad(c->spec)) return false;
             for (auto d : c->dispatch) if (bad(d)) return false;

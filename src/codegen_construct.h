@@ -1120,6 +1120,10 @@ inline void CodeGen::FixedArrayLitAt(ArrayLit *al, const string &base, bool inro
 // EmitRelStoreAt); a temporary that is copied afterwards is not.
 inline void CodeGen::StructLitAt(StructLit *sl, const string &base, bool inroot) {
     auto et = sl->exprtype;
+    if (ZeroDefaultValue(sl, et)) {
+        EmitDefaultInto(base, et);
+        return;
+    }
     // `baseoff` is where the fields run starts within the whole value, so a
     // `self` field can store its (constant) offset back to it.
     auto fieldset = [&](const string &b, const vector<Field> &fields,

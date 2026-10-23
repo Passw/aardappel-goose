@@ -422,6 +422,7 @@ struct CodeGen {
     // builds as a literal of the call's own (Call::defaultinit).
 
     bool HasFieldDefaults(TypeExpr *t);
+    bool ZeroDefaultValue(Node *n, TypeExpr *t);
     void EmitDefaultInto(const string &lv, TypeExpr *t);
 
     // ------------------------------------------------------------------

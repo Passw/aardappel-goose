@@ -1252,6 +1252,31 @@ inline void CodeGen::EmitDefaultInto(const string &lv, TypeExpr *t) {
     L("GS_MEMZERO(&", lv, ", sizeof(", lv, "));");
 }
 
+// An explicitly checked, flat zero default, including aggregate defaults
+// expanded into literals by type checking. Declared defaults keep their
+// normal construction, even if they happen to produce zero.
+inline bool CodeGen::ZeroDefaultValue(Node *n, TypeExpr *t) {
+    function<bool(TypeExpr *)> flat = [&](TypeExpr *ft) {
+        if (!IsFix(ft)) return false;
+        switch (ft->kind) {
+            case TY_INT: case TY_FLT: case TY_BOOL: return true;
+            case TY_STRUCT: return SI(ft)->flat;
+            case TY_ARRAY: return ft->arr->akind == A_FIXED && flat(ft->arr->sub);
+            default: return false;
+        }
+    };
+    if (!flat(t) || HasFieldDefaults(t)) return false;
+    if (auto c = Is<Call>(n))
+        return c->builtin == B_DEFAULT && c->rettypes.size() == 1 && TEq(c->rettypes[0], t);
+    auto sl = Is<StructLit>(n);
+    if (!sl || t->kind != TY_STRUCT || !TEq(sl->exprtype, t)) return false;
+    auto si = SI(t);
+    for (size_t i = 0; i < si->st->fields.size(); i++)
+        if (!si->st->fields[i].ispad && !ZeroDefaultValue(sl->InitFor((int)i), si->ftypes[i]))
+            return false;
+    return true;
+}
+
 // ------------------------------------------------------------------
 // Structural equality (§4.5): gs_eq_<mangle>. Fixed values pass by value,
 // bytes values as pointers. Gap-free fixed types without floats of more

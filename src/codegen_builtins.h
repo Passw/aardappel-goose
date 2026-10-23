@@ -105,7 +105,7 @@ inline vector<string> CodeGen::EmitBuiltin(Call *c, Dst d0) {
             auto t = c->rettypes[0];
             auto tv = T();
             FixedLocal(t, tv);
-            if (!c->defaultinit) EmitDefaultInto(tv, t);
+            if (!HasFieldDefaults(t)) EmitDefaultInto(tv, t);
             else if (t->kind == TY_ARRAY) {
                 auto i = T();
                 L("for (int64_t ", i, " = 0; ", i, " < ", ArrSize(t->arr), "; ", i, "++) {");
@@ -972,28 +972,7 @@ inline bool CodeGen::BulkDefaultLoop(ForLoop *loop) {
     if (type->kind == TY_REF) type = type->ref->sub;
     if (append ? !IsResz(type) || type->kind != TY_ARRAY : type->kind != TY_SLICE) return false;
     auto elem = append ? type->arr->sub : type->sub;
-    function<bool(TypeExpr *)> flat = [&](TypeExpr *t) {
-        if (!IsFix(t)) return false;
-        switch (t->kind) {
-            case TY_INT: case TY_FLT: case TY_BOOL: return true;
-            case TY_STRUCT: return SI(t)->flat;
-            case TY_ARRAY: return t->arr->akind == A_FIXED && flat(t->arr->sub);
-            default: return false;
-        }
-    };
-    if (!flat(elem) || HasFieldDefaults(elem) || !FieldChainRoot(unref(array), true)) return false;
-    function<bool(Node *, TypeExpr *)> zero = [&](Node *n, TypeExpr *t) {
-        if (auto c = Is<Call>(n))
-            return c->builtin == B_DEFAULT && c->rettypes.size() == 1 && TEq(c->rettypes[0], t);
-        // Aggregate defaults can be expanded into their checked literals.
-        auto sl = Is<StructLit>(n);
-        if (!sl || t->kind != TY_STRUCT || !TEq(sl->exprtype, t)) return false;
-        auto si = SI(t);
-        for (size_t i = 0; i < si->st->fields.size(); i++)
-            if (!si->st->fields[i].ispad && !zero(sl->InitFor((int)i), si->ftypes[i])) return false;
-        return true;
-    };
-    if (!zero(value, elem)) return false;
+    if (!FieldChainRoot(unref(array), true) || !ZeroDefaultValue(value, elem)) return false;
     auto lv = RecvLoc(array);
     auto view = ArrayView(lv);
     auto esz = FixedSize(elem);

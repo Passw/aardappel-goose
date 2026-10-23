@@ -1,8 +1,8 @@
-"""Compare slice_pool with reusable[] using identical workloads and native C builds.
+"""Compare slice_pool with reusable[] using identical workloads native C, standalone TinyCC and JIT.
 
 python bench/slice_pool.py --exe build-root/Release/goose.exe
 The matrix covers append, fragmented reuse and resize, 8/128-byte elements,
-and inline/preserved exercise call boundaries at Goose O2 by default. Artifacts include
+and inline/preserved exercise call boundaries at Goose O1/O2 by default. Artifacts include
 generated Goose/C, compiler logs, all timing samples, sizes and stack reports.
 Times include process startup, initialization, final checksumming and shutdown.
 """
@@ -23,6 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import toolchain as tc
+import pool_bench_support as support
 
 MODES = {"append": 0, "fragmented": 1, "resize": 2}
 
@@ -67,6 +68,7 @@ def source_for(template, backend, n, live, width, mode, calls):
 def generate(exe, path, source, level, calls):
     path.write_text(source, encoding="utf-8")
     cfile = path.with_suffix(".c")
+    start = time.perf_counter()
     built = subprocess.run([str(exe), f"-O{level}", "--standalone", "--stacks",
                             "-o", str(cfile), str(path)],
                            capture_output=True, text=True, timeout=120)
@@ -78,24 +80,17 @@ def generate(exe, path, source, level, calls):
     # inline Goose function disappears; at O0 request native inlining instead.
     c = cfile.read_text(encoding="utf-8")
     modifier = "GS_NOINLINE" if calls == "boundary" else "GS_INLINE"
-    c, count = re.subn(r"(?m)^static uint64_t (exercise_g\w*\()",
-                       rf"static {modifier} uint64_t \1", c)
+    count = 0
+    if calls != "natural":
+        c, count = re.subn(r"(?m)^static uint64_t (exercise_g\w*\()",
+                           rf"static {modifier} uint64_t \1", c)
     if calls == "boundary" and count < 2:
         raise RuntimeError("exercise call boundary was removed unexpectedly")
     if calls == "boundary" and len(re.findall(r"\bexercise_g\w*\(", c)) < count + 2:
         raise RuntimeError("expected both owners to cross the exercise call boundary")
     cfile.write_text(c, encoding="utf-8")
-    return cfile, dict(c_bytes=cfile.stat().st_size, exercise_declarations=count,
-                       stacks=[s for s in report.splitlines() if s.startswith("main program:")])
-
-
-def run(binary):
-    start = time.perf_counter()
-    p = subprocess.run([str(binary)], capture_output=True, text=True, timeout=180)
-    elapsed = time.perf_counter() - start
-    if p.returncode:
-        raise RuntimeError(p.stdout + p.stderr)
-    return elapsed, p.stdout
+    return cfile, dict(goose_seconds=time.perf_counter() - start, c_bytes=cfile.stat().st_size, exercise_declarations=count,
+                       c_policy=calls, stacks=[s for s in report.splitlines() if s.startswith("main program:")])
 
 
 def main():
@@ -113,9 +108,12 @@ def main():
     ap.add_argument("--affinity", type=lambda s: int(s, 0), help="inherited CPU affinity mask, e.g. 0x4")
     ap.add_argument("--modes", nargs="+", choices=MODES, default=list(MODES))
     ap.add_argument("--widths", nargs="+", type=int, choices=(1, 16), default=[1, 16])
-    ap.add_argument("--levels", nargs="+", type=int, choices=(0, 2), default=[2])
-    ap.add_argument("--calls", nargs="+", choices=("inline", "boundary"), default=["inline", "boundary"])
+    ap.add_argument("--levels", nargs="+", type=int, choices=(0, 1, 2), default=[1, 2])
+    ap.add_argument("--calls", nargs="+", choices=("natural", "inline", "boundary"), default=["natural", "boundary"])
     ap.add_argument("--out", type=Path, default=ROOT / "build" / "slice-pool-bench")
+    ap.add_argument("--compilers", nargs="+", choices=("msvc", "clang", "tcc", "jit"),
+                    default=["clang", "tcc", "jit"],
+                    help="jit measures compilation and execution; tcc measures standalone execution")
     args = ap.parse_args()
     if args.n <= 0 or args.grow_n <= 0 or args.n % 4 or args.grow_n % 4:
         ap.error("--n and --grow-n must be positive multiples of 4")
@@ -126,7 +124,7 @@ def main():
             ap.error("--affinity must be a positive CPU mask")
         set_affinity(args.affinity)
     exe = tc.find_goose(args.exe)
-    compilers = tc.find_ccs()
+    compilers = support.compilers(tc, exe, args.compilers)
     if not compilers:
         raise SystemExit("No native C toolchain available")
     out = args.out.resolve()
@@ -147,6 +145,7 @@ def main():
                     live=args.live, reps=args.reps, warmups=args.warmups, affinity=args.affinity,
                     executable=str(exe),
                     compiler_sha256=hashlib.sha256(exe.read_bytes()).hexdigest(),
+                    compilers=args.compilers,
                     slice_pool_sha256=hashlib.sha256(library).hexdigest(),
                     workload_sha256=hashlib.sha256(template.encode("utf-8")).hexdigest(), runs=results)
     if previous is not None:
@@ -167,15 +166,12 @@ def main():
                         source = source_for(template, backend, n, args.live, width, MODES[mode], calls)
                         generated[backend] = generate(exe, path, source, level, calls)
                     for compiler in compilers.values():
-                        binaries, timings, metrics = {}, {}, {}
+                        binaries, timings, metrics, cycles = {}, {}, {}, {}
                         for backend, (cfile, metric) in generated.items():
                             binary = out / f"{case}-{backend}-{compiler.name}{tc.EXE_SUFFIX}"
-                            ok, log = compiler.compile(cfile, binary, opt=2)
-                            binary.with_suffix(".cc.log").write_text(log, encoding="utf-8")
-                            if not ok:
-                                raise RuntimeError(log)
-                            binaries[backend], timings[backend] = binary, []
-                            metrics[backend] = dict(metric, exe_bytes=binary.stat().st_size)
+                            binaries[backend], metrics[backend] = support.prepare(
+                                compiler, cfile, binary, exe, level, metric)
+                            timings[backend], cycles[backend] = [], []
                         key = (mode, width)
                         # Warm both, then alternate ordering to reduce timing drift.
                         for rep in range(args.reps + args.warmups):
@@ -186,26 +182,30 @@ def main():
                             if rep % 2:
                                 order.reverse()
                             for backend in order:
-                                elapsed, checksum = run(binaries[backend])
+                                elapsed, checksum, cycle_count = support.measure(binaries[backend])
                                 expected = checksums.setdefault(key, checksum)
                                 if checksum != expected:
                                     raise RuntimeError(f"Checksum mismatch for {case}, {backend}, {compiler.name}")
                                 if rep >= args.warmups:
                                     timings[backend].append(elapsed)
+                                    if cycle_count is not None:
+                                        cycles[backend].append(cycle_count)
                         medians = {k: statistics.median(v) for k, v in timings.items()}
+                        scores = {k: statistics.median(v) for k, v in cycles.items()} if all(cycles.values()) else medians
                         row = dict(case=case, compiler=compiler.desc, mode=mode,
                                    item_bytes=width * 8, goose_level=level, calls=calls,
                                    checksum=checksums[key].strip(), seconds=timings,
-                                   median_seconds=medians,
-                                   ratio=medians["slice_pool"] / medians["reusable"], metrics=metrics)
+                                   median_seconds=medians, cycles=cycles,
+                                   ratio_metric="cycles" if all(cycles.values()) else "seconds",
+                                   ratio=scores["slice_pool"] / scores["reusable"], metrics=metrics)
                         if previous is not None:
-                            row["port_ratio"] = medians["slice_pool"] / medians["previous_slice_pool"]
+                            row["port_ratio"] = scores["slice_pool"] / scores["previous_slice_pool"]
                         results.append(row)
                         (out / "results.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
                         control = (f" previous={medians['previous_slice_pool'] * 1000:.2f} ms "
                                    f"port_ratio={row['port_ratio']:.3f}" if previous is not None else "")
                         print(f"{case:32} {compiler.name:8} reusable={medians['reusable'] * 1000:8.2f} ms "
-                              f"slice_pool={medians['slice_pool'] * 1000:8.2f} ms ratio={row['ratio']:.3f}"
+                              f"slice_pool={medians['slice_pool'] * 1000:8.2f} ms {row['ratio_metric']}_ratio={row['ratio']:.3f}"
                               f"{control}", flush=True)
 
 

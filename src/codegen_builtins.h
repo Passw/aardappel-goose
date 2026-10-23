@@ -933,6 +933,90 @@ inline void CodeGen::EmitSliceExtend(const Loc &lv, const string &end, int64_t e
     L("}");
 }
 
+// Two checked loop idioms whose zero defaults have no observable per-element
+// work: filling a whole slice, and appending from an array's length to an end.
+// Field defaults, relative references and arbitrary expressions keep their
+// ordinary evaluation order and construction code.
+inline bool CodeGen::BulkDefaultLoop(ForLoop *loop) {
+    if (loop->idxdef || loop->vdef->captured || loop->vdef->type->kind != TY_INT ||
+        loop->vdef->type->intstorage != IS_I64) return false;
+    auto loopbody = loop->body;
+    if (loopbody->stmts.size() != 1 || loopbody->tail) return false;
+    auto unref = [](Node *n) {
+        auto u = Is<Unary>(n);
+        return u && u->op == T_BITAND ? u->child : n;
+    };
+    auto lenof = [&](Node *n, Node *array) {
+        auto dot = Is<Dot>(n);
+        return dot && !dot->IsField() && dot->name == "len" && SamePath(dot->obj, unref(array));
+    };
+    Node *array = nullptr, *value = nullptr, *end = nullptr;
+    auto append = false;
+    if (auto a = Is<Assign>(loopbody->stmts[0]); a &&
+        (a->op == T_ASSIGN || a->op == T_DOTASSIGN) && loop->iterkind == IK_COUNT) {
+        auto index = Is<Index>(a->lval);
+        auto id = index ? Is<Ident>(index->idx) : nullptr;
+        if (!id || id->vdef != loop->vdef || !lenof(loop->iter, index->obj)) return false;
+        array = index->obj; value = a->rhs;
+    } else if (auto call = Is<Call>(loopbody->stmts[0]); call &&
+               call->builtin == B_PUSH && loop->iterkind == IK_RANGE) {
+        auto args = call->ValueArgNodes();
+        auto range = Is<RangeExpr>(loop->iter);
+        if (args.size() != 2 || !range || !lenof(range->lo, args[0]) ||
+            (!Is<Ident>(range->hi) && !Is<IntLit>(range->hi)) ||
+            range->exprtype->kind != TY_INT || range->exprtype->intstorage != IS_I64)
+            return false;
+        array = args[0]; value = args[1]; end = range->hi; append = true;
+    } else return false;
+    auto type = unref(array)->exprtype;
+    if (type->kind == TY_REF) type = type->ref->sub;
+    if (append ? !IsResz(type) || type->kind != TY_ARRAY : type->kind != TY_SLICE) return false;
+    auto elem = append ? type->arr->sub : type->sub;
+    function<bool(TypeExpr *)> flat = [&](TypeExpr *t) {
+        if (!IsFix(t)) return false;
+        switch (t->kind) {
+            case TY_INT: case TY_FLT: case TY_BOOL: return true;
+            case TY_STRUCT: return SI(t)->flat;
+            case TY_ARRAY: return t->arr->akind == A_FIXED && flat(t->arr->sub);
+            default: return false;
+        }
+    };
+    if (!flat(elem) || HasFieldDefaults(elem) || !FieldChainRoot(unref(array), true)) return false;
+    function<bool(Node *, TypeExpr *)> zero = [&](Node *n, TypeExpr *t) {
+        if (auto c = Is<Call>(n))
+            return c->builtin == B_DEFAULT && c->rettypes.size() == 1 && TEq(c->rettypes[0], t);
+        // Aggregate defaults can be expanded into their checked literals.
+        auto sl = Is<StructLit>(n);
+        if (!sl || t->kind != TY_STRUCT || !TEq(sl->exprtype, t)) return false;
+        auto si = SI(t);
+        for (size_t i = 0; i < si->st->fields.size(); i++)
+            if (!si->st->fields[i].ispad && !zero(sl->InitFor((int)i), si->ftypes[i])) return false;
+        return true;
+    };
+    if (!zero(value, elem)) return false;
+    auto lv = RecvLoc(array);
+    auto view = ArrayView(lv);
+    auto esz = FixedSize(elem);
+    if (append) {
+        NoteLen(lv.stk, view.lenlv);
+        auto first = T(), limit = T();
+        L("int64_t ", first, " = ", view.len, ";");
+        L("int64_t ", limit, " = ", GenX(end), ";");
+        L("if (", limit, " > ", first, ") {");
+        ind++;
+        L("if ((uint64_t)", limit, " > GS_STACK_RESERVE / ", esz,
+          ") gs_abort(GS_E_ARRAYLEN, ", LocArgs(loop->line), ");");
+        L("GS_MEMZERO(", Top(lv.stk), ", (size_t)((", limit, " - ", first, ") * ", esz, "));");
+        Bump(lv.stk, cat("(", limit, " - ", first, ") * ", esz));
+        L(view.lenlv, " = ", limit, ";");
+        ind--;
+        L("}");
+    } else {
+        L("if (", view.len, ") GS_MEMZERO(", view.elems, ", (size_t)(", view.len, " * ", esz, "));");
+    }
+    return true;
+}
+
 // Default values (§4.2) for `count` elements of an array view from index
 // `first`: one clear where the default is all zero bytes, else each built.
 inline void CodeGen::EmitDefaultElems(const ArrView &v, const string &first,

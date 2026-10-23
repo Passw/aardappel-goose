@@ -1386,6 +1386,7 @@ struct CodeGen {
     string SliceLen(Node *n, TypeExpr *elem, Line ln, const char *error = "GS_E_SLICELEN");
     void EmitSliceExtend(const Loc &lv, const string &end, int64_t esz);
     void EmitDefaultElems(const ArrView &v, const string &first, const string &count, Node *init);
+    bool BulkDefaultLoop(ForLoop *loop);
 
     // thread_spawn(worker, args...): pack the flat arguments contiguously on
     // a scratch stack, hand them to the runtime, unpack in a per-worker thunk.

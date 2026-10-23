@@ -963,6 +963,7 @@ inline void While::CgStmt(CodeGen &cg) {
 }
 
 inline void ForLoop::CgStmt(CodeGen &cg) {
+    if (cg.BulkDefaultLoop(this)) return;
     auto d = Dst {};
     CodeGen::ViewScope vs(cg, hoistrefs, hoistfields);
     auto iv = cg.LocalName(vdef);

@@ -1781,6 +1781,22 @@ def main():
         else:
             r.ok("root owner caches")
     r.show_task(root_owner_caches)
+    def bulk_default_loops():
+        cfile = gendir / "bulk-default-loops-shapes.c"
+        code, out, err = r.goose("-O0", "-o", cfile, HERE / "codegen" / "bulk_default_loops.goose")
+        if code != 0:
+            r.fail("bulk default loops", out + err)
+            return
+        text = cfile.read_text()
+        bodies = re.findall(r"^static [^\n;]*\b(?:grow|fill)_g\w*\([^\n]*\) \{\n(.*?)^\}\n",
+                            text, re.MULTILINE | re.DOTALL)
+        bulk = [b for b in bodies if "GS_MEMZERO" in b and "for (" not in b]
+        effects = [b for b in bodies if "next_g" in b and "for (" in b]
+        if len(bulk) != 4 or len(effects) != 2:
+            r.fail("bulk default loops", "\n".join(bodies))
+        else:
+            r.ok("bulk default loops")
+    r.show_task(bulk_default_loops)
     # Inlined helpers and chains of immutable root aliases keep one spelling
     # of each component. This caller remains out of line (multiple results).
     def root_alias_caches():

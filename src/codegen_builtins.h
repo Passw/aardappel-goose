@@ -331,7 +331,7 @@ inline vector<string> CodeGen::EmitBuiltin(Call *c, Dst d0) {
             auto v = ArrayView(lv);
             auto elem = v.elem;
             auto esz = FixedSize(elem);
-            if (lv.t->arr->akind != A_LIMITED) NoteLen(lv.stk, v.lenlv);
+            if (lv.t->arr->akind != A_LIMITED) NoteLen(lv.stk, v.lenlv, lv.lenroot);
             auto nl = T();
             L("int64_t ", nl, " = ", v.len, " - 1;");
             // On empty, the stored length would wrap (limited arrays) or
@@ -360,7 +360,7 @@ inline vector<string> CodeGen::EmitBuiltin(Call *c, Dst d0) {
             auto lv = RecvLoc(an[0]);
             auto v = ArrayView(lv);
             auto ak = lv.t->arr->akind;
-            if (ak != A_LIMITED) NoteLen(lv.stk, v.lenlv);
+            if (ak != A_LIMITED) NoteLen(lv.stk, v.lenlv, lv.lenroot);
             auto nn = GenPure(an[1]);
             // The length is read after the count, which may have changed it.
             auto ol = T();
@@ -381,7 +381,7 @@ inline vector<string> CodeGen::EmitBuiltin(Call *c, Dst d0) {
             auto esz = FixedSize(elem);
             auto ak = lv.t->arr->akind;
             auto relref = IsRelRef(elem);
-            if (ak != A_LIMITED) NoteLen(lv.stk, v.lenlv);
+            if (ak != A_LIMITED) NoteLen(lv.stk, v.lenlv, lv.lenroot);
             auto nn = GenPure(an[1]);
             string fv;
             if (an.size() > 2) {
@@ -465,7 +465,7 @@ inline vector<string> CodeGen::EmitBuiltin(Call *c, Dst d0) {
             // reserved and only its length moves.
             auto ak = lv.t->arr->akind;
             if (ak == A_GROWSHRINK || ak == A_GROW) {
-                NoteLen(lv.stk, v.lenlv);
+                NoteLen(lv.stk, v.lenlv, lv.lenroot);
                 L(TopW(lv.stk), " = (uint8_t *)(", v.elems, ");");
             }
             L(v.lenlv, " = 0;");
@@ -637,7 +637,7 @@ inline vector<string> CodeGen::EmitPush(vector<Node *> &an, Line ln) {
         ref = e;
     } else {
         assert(!lv.stk.empty());
-        NoteLen(lv.stk, v.lenlv);
+        NoteLen(lv.stk, v.lenlv, lv.lenroot);
         auto e = T();
         if (IsBytesT(elem)) {
             L("uint8_t *", e, " = ", Top(lv.stk), ";");
@@ -685,7 +685,7 @@ inline void CodeGen::EmitAppend(vector<Node *> &an, Line ln) {
     auto st = src->exprtype;
     auto asrun = IsResz(st) || (st->kind == TY_ARRAY && st->arr->akind == A_VAR);
     auto fresh = Is<Call>(src) || IsCtl(src);
-    if (ak != A_LIMITED) NoteLen(lv.stk, v.lenlv);
+    if (ak != A_LIMITED) NoteLen(lv.stk, v.lenlv, lv.lenroot);
     if (fresh && asrun && ak != A_LIMITED) {
         auto nn = T();
         L("int64_t ", nn, " = 0;");
@@ -977,7 +977,7 @@ inline bool CodeGen::BulkDefaultLoop(ForLoop *loop) {
     auto view = ArrayView(lv);
     auto esz = FixedSize(elem);
     if (append) {
-        NoteLen(lv.stk, view.lenlv);
+        NoteLen(lv.stk, view.lenlv, lv.lenroot);
         auto first = T(), limit = T();
         L("int64_t ", first, " = ", view.len, ";");
         L("int64_t ", limit, " = ", GenX(end), ";");

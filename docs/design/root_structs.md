@@ -598,14 +598,25 @@ freelist policy with root-reference overhead.
 
 ### V1 validation record
 
-The Windows x64 baseline passed on 2026-10-25 with MSVC and TinyCC, including
-1,429 parse/round-trip/typecheck checks, 682 native program checks, 191
-runtime-debug checks, 836 JIT runs, the compiler root-domain tests, generated-C
-cache/hoisting assertions, and the runnable reference examples. Root alias,
-recursive capture, pool equivalence and allocator model fixtures also run at O1.
+After rebasing onto master `cce94b91`, the Windows x64 baseline passed on
+2026-10-27 using an assertion-enabled Debug compiler, MSVC and the hosted TinyCC
+JIT: 1,406 parse/round-trip/typecheck checks, 671 native program checks, 191
+runtime-debug checks and 826 JIT runs. The compiler root-domain tests,
+generated-C cache/hoisting assertions, bootstrap, formatter, language server,
+error fixtures, samples and runnable reference examples also passed.
+
+Root alias, recursive capture, pool equivalence and allocator model fixtures
+also run at O1. Root/defer integration runs at O0/O1/O2 and with runtime checks,
+covering holder aliases, both pool types, early returns, loop exits, recursive
+unwinding and nonlocal returns. Formatter coverage includes root declarations
+and named component paths. All 40 VS Code extension tests passed with the
+rebased compiler, with no skips.
+
 The baseline includes native worker-local ownership and transitive worker-global
 rejection; TinyCC does not run worker programs. Optional audio/gfx/physics/UI
 modules were not built. Linux/macOS and sanitizer CI were not run locally.
+The benchmark reports retain their dated 2026-10-25 measurements; this validation
+run did not remeasure performance after the rebase.
 
 Implementation steps 1–4 are complete. Step 5 has both pool implementations,
 differential tests and repeatable native/TinyCC/JIT benchmarks. Current application

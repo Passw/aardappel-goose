@@ -29,10 +29,12 @@ application work between operations.
 | Geometric mean | | 0.956 | 1.077 | 1.059 | 0.955 | 1.100 | 1.052 |
 
 Standalone TinyCC measures execution only. **JIT total** includes Goose
-compilation, TinyCC compilation and execution, matching the default O1 command
-path; it is not an allocation-only measurement. Process startup, initialization
-and final checksumming are included on both sides. Wall times are also retained,
-but were more sensitive to background activity than process cycles.
+compilation, TinyCC compilation and execution at the stated optimization level;
+it is not an allocation-only measurement. O2 is now the default. These timings
+predate the 2026-10-27 rebase and its hosted JIT runtime. Process startup,
+initialization and final checksumming are included on both sides. Wall times
+are also retained, but were more sensitive to background activity than process
+cycles.
 
 ## Reproduce
 

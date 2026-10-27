@@ -120,7 +120,7 @@ def debug_fixture(f, line):
 
 
 def fixture_levels(levels, line):
-    """Selected optimizer regressions exercise the default O1 path too."""
+    """Selected optimizer regressions exercise O1 as well as the profile levels."""
     return tuple(sorted(set(levels) | {"1"})) if "all-levels" in line else levels
 
 
@@ -1912,7 +1912,7 @@ def main():
     r.show_task(static_arrays)
 
     # Every annotated regression, including the expected-abort cases. These
-    # describe the default O1 pass; O0/O2 execution checks semantics.
+    # describe the O1 pass; O0/O2 execution checks semantics.
     r.section("bounds-check annotations")
     for f in tests:
         r.show(lambda f=f: fixtures[f].result().bce)

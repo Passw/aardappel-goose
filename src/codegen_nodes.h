@@ -927,7 +927,7 @@ inline void Assign::CgStmt(CodeGen &cg) {
     }
     // A small aggregate variable goes out as one store of its width, as a
     // pushed element does (StoreWhole); TinyCC copies a struct assignment
-    // through rep movs.
+    // with string moves.
     if (Is<Ident>(rhs) && !lv.ispref && cg.WholeStore(t) &&
         (t->kind != TY_ARRAY || t->arr->akind == A_FIXED)) {
         auto x = cg.GenXD(rhs, t);

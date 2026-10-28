@@ -11,7 +11,7 @@ allocation order and final contents.
 
 ## Current measurements
 
-Measured 2026-10-25 on Windows, Ryzen 9 9950X3D, CPUs 16–31. Ratios are
+Measured 2026-10-28 on Windows, Ryzen 9 9950X3D, CPUs 16–31. Ratios are
 library / builtin; smaller is better. Clang compiles the generated C at O2.
 Each cell is the ratio of median process-cycle counts from seven interleaved
 samples after two warmups, with identical checksums. The six-case means give
@@ -20,18 +20,17 @@ application work between operations.
 
 | Workload | Bytes | O1 Clang | O1 TinyCC | O1 JIT total | O2 Clang | O2 TinyCC | O2 JIT total |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| append | 8 | 1.033 | 1.081 | 1.030 | 1.041 | 1.097 | 1.038 |
-| append | 128 | 0.981 | 1.047 | 1.100 | 0.993 | 1.069 | 1.048 |
-| lifo | 8 | 0.923 | 1.199 | 1.135 | 0.916 | 1.143 | 1.138 |
-| lifo | 128 | 0.938 | 0.922 | 1.004 | 0.949 | 1.011 | 0.956 |
-| scattered | 8 | 0.916 | 1.154 | 1.127 | 0.893 | 1.175 | 1.131 |
-| scattered | 128 | 0.951 | 1.080 | 0.968 | 0.947 | 1.112 | 1.011 |
-| Geometric mean | | 0.956 | 1.077 | 1.059 | 0.955 | 1.100 | 1.052 |
+| append | 8 | 1.034 | 0.976 | 1.030 | 0.959 | 0.957 | 1.039 |
+| append | 128 | 0.959 | 0.979 | 1.003 | 0.983 | 0.963 | 1.037 |
+| lifo | 8 | 0.854 | 0.955 | 1.032 | 0.842 | 0.971 | 1.002 |
+| lifo | 128 | 0.926 | 0.945 | 1.086 | 0.932 | 0.989 | 1.007 |
+| scattered | 8 | 0.926 | 0.962 | 1.031 | 0.921 | 0.972 | 1.045 |
+| scattered | 128 | 0.902 | 0.975 | 0.939 | 0.917 | 1.008 | 0.990 |
+| Geometric mean | | 0.932 | 0.965 | 1.019 | 0.924 | 0.976 | 1.020 |
 
 Standalone TinyCC measures execution only. **JIT total** includes Goose
 compilation, TinyCC compilation and execution at the stated optimization level;
-it is not an allocation-only measurement. O2 is now the default. These timings
-predate the 2026-10-27 rebase and its hosted JIT runtime. Process startup,
+it is not an allocation-only measurement. O2 is now the default. Process startup,
 initialization and final checksumming are included on both sides. Wall times
 are also retained, but were more sensitive to background activity than process
 cycles.
@@ -58,8 +57,13 @@ frees are available as `alloc_index_with` and `free_ref`; application results
 using them are in [pool_workloads.md](pool_workloads.md). The library keeps its
 index checks, and no occupancy tracking or private-field assumption was added.
 
-Native Clang meets the general microbenchmark goal. TinyCC still has a modest
-average gap and a larger gap for tightly repeated 8-byte reuse. A prototype
-passing the canonical root descriptor plus separate component arguments did
-not materially close that gap and was not retained. An escape-sensitive ABI
-that also forwards component arguments remains a separate compiler project.
+Native Clang and standalone TinyCC both meet the general microbenchmark goal.
+TinyCC keeps every C temporary in memory and copies a struct assignment with
+string moves (`movsq`), so until 2026-10-28 the library's 8-byte reuse ran 1.14–1.20x the
+builtin's under it (geometric mean 1.08–1.10). The compiler changes that closed
+it are general: a pop the preceding length test makes safe drops its emptiness
+check (bounds-check elimination), pops, pushes and element reads and stores keep
+no temporaries they do not need, a small struct variable is stored as one
+integer, and `i < 0 || i >= items.len` is one unsigned comparison. The index
+check on a slot popped from the public freelist stays. JIT totals, which
+include compiling each program, are about 2% above the builtin.

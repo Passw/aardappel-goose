@@ -197,6 +197,125 @@ inline void CodeGen::FindKnownRootParams() {
     }
 }
 
+// A root owner's descriptor holds its components' references and addresses,
+// none of which change once the owner is made, so a callee can take those
+// members instead of the descriptor's address and rebuild it in a local of
+// its own. That copy lasts as long as the call: every use of the parameter,
+// or of an alias standing for it, must project a field or hand the reference
+// to another parameter passed the same way. One that is stored, returned,
+// captured, or given to a builtin or to a callee whose signature is fixed (an
+// export, a worker, a dispatched or formatting overload) keeps the
+// descriptor's address, as does every parameter it is forwarded to from such
+// a one. A parameter FindKnownRootParams resolved to a global is not read at
+// all, and keeps the one pointer.
+inline void CodeGen::FindSplitRootParams() {
+    auto rootref = [&](const VarDef *v) {
+        return v && v->type && v->type->kind == TY_REF && !v->type->ref->optional &&
+               IsRoot(v->type->ref->sub) && !v->isvar && !v->isglobal && !v->captured &&
+               !capturedvars.count(v);
+    };
+    unordered_map<const VarDef *, const VarDef *> standsfor;
+    set<const VarDef *> fixed;
+    unordered_map<const VarDef *, vector<const VarDef *>> forwards;
+    for (auto sp : livespecs)
+        for (auto p : sp->params)
+            if (rootref(p) && !knownrootparams.count(p)) standsfor[p] = p;
+    auto opaque = [&](FnSpec *k) {
+        if (k) for (auto p : k->params) fixed.insert(p);
+    };
+    for (auto sp : livespecs)
+        if (sp->sf->isexport || sp->sf->isthread) opaque(sp);
+    auto scan = [&](Node *body) {
+        set<const Node *> handled;
+        auto group = [&](Node *x) -> const VarDef * {
+            auto id = Is<Ident>(x);
+            auto it = id ? standsfor.find(id->vdef) : standsfor.end();
+            return it != standsfor.end() ? it->second : nullptr;
+        };
+        auto bind = [&](VarDef *d, Node *init) {
+            auto p = group(init);
+            if (!p || !rootref(d) || !TEq(d->type, init->exprtype)) return;
+            standsfor[d] = p;
+            handled.insert(init);
+        };
+        function<void(Node *)> walk = [&](Node *n) {
+            if (!n) return;
+            if (auto vd = Is<VarDecl>(n); vd && vd->defs.size() == vd->inits.size())
+                for (size_t i = 0; i < vd->defs.size(); i++) bind(vd->defs[i], vd->inits[i]);
+            if (auto c = Is<Call>(n)) {
+                if (c->fvbody)
+                    for (size_t i = 0; i < c->fvparams.size() && i < c->args.size(); i++)
+                        bind(c->fvparams[i], c->args[i]);
+                if (c->spec && c->builtin < 0 && c->dispatch.empty()) {
+                    auto an = CallArgNodes(c, c->spec->params.size());
+                    for (size_t i = 0; i < an.size(); i++)
+                        if (auto p = group(an[i]); p && handled.insert(an[i]).second)
+                            forwards[p].push_back(c->spec->params[i]);
+                } else opaque(c->spec);
+                for (auto k : c->dispatch) opaque(k);
+                for (auto [t, k] : c->fmtspecs) opaque(k);
+                for (auto [fv, v] : c->fvremap)
+                    if (auto it = standsfor.find(v); it != standsfor.end()) fixed.insert(it->second);
+            }
+            if (auto d = Is<Dot>(n); d && d->IsField() && d->fieldidx >= 0 && group(d->obj))
+                handled.insert(d->obj);
+            if (auto p = group(n); p && !handled.count(n)) fixed.insert(p);
+            RunChildren(n, walk);
+        };
+        walk(body);
+    };
+    for (auto sp : livespecs) scan(sp->body);
+    for (auto g : ast.globals) scan(g);
+    for (auto changed = true; changed;) {
+        changed = false;
+        for (auto &[p, ks] : forwards) {
+            if (fixed.count(p)) continue;
+            for (auto k : ks)
+                if (!standsfor.count(k) || standsfor[k] != k || fixed.count(k)) {
+                    fixed.insert(p);
+                    changed = true;
+                    break;
+                }
+        }
+    }
+    for (auto [v, p] : standsfor)
+        if (v == p && !fixed.count(p)) splitroots.insert(p);
+}
+
+// The descriptor that v, a root reference, points at, where v is the address
+// of a variable's own (`&x`, `(&x)`, `&GS_GL->x`); otherwise "".
+inline string CodeGen::NamedRootDesc(const string &v) {
+    string inner;
+    if (v.size() > 3 && v.compare(0, 2, "(&") == 0 && v.back() == ')')
+        inner = v.substr(2, v.size() - 3);
+    else if (v.size() > 1 && v[0] == '&')
+        inner = v.substr(1);
+    auto global = inner.compare(0, 7, "GS_GL->") == 0;
+    return IsCName(global ? inner.substr(7) : inner) ? inner : string();
+}
+
+// The members of the root descriptor that v, a reference to it, points at,
+// in the order SigParams takes a split root parameter's (FindSplitRootParams).
+inline void CodeGen::PushRootMembers(vector<string> &args, TypeExpr *t, string v) {
+    auto desc = NamedRootDesc(v);
+    if (desc.empty()) {
+        if (!IsCName(v)) {
+            auto x = T();
+            L(CT(t), " ", x, " = ", v, ";");
+            v = x;
+        }
+        desc = cat("(*", v, ")");
+    }
+    auto si = SI(t->ref->sub);
+    for (size_t f = 0; f < si->ftypes.size(); f++) {
+        if (!si->ftypes[f]) continue;
+        auto m = cat(desc, ".", Sanitize(si->st->fields[f].name));
+        auto fs = ParamFields(ast.RefTo(si->ftypes[f], t->line), false);
+        if (fs.empty()) args.push_back(m);
+        for (auto &fm : fs) args.push_back(cat(m, ".", fm.second));
+    }
+}
+
 inline void CodeGen::CollectSpecs() {
     for (auto sp : ast.fnspecs)
         if (sp->live && sp->body) livespecs.push_back(sp);
@@ -421,6 +540,26 @@ inline string CodeGen::SigParams(FnSpec *sp, bool decls, bool er) {
         if (IsPoolParam(sp, i)) {
             EmitCoreTypes();
             addval(pt, true, "gs_pref", pn);
+        } else if (splitroots.count(vd)) {
+            // The descriptor's members, each as ParamFields passes its type
+            // (PushRootMembers), assigned to a local descriptor at entry.
+            auto ri = SI(pt->ref->sub);
+            string sets;
+            for (size_t f = 0; f < ri->ftypes.size(); f++) {
+                if (!ri->ftypes[f]) continue;
+                auto rt = ast.RefTo(ri->ftypes[f], pt->line);
+                auto fn = Sanitize(ri->st->fields[f].name);
+                auto fs = ParamFields(rt, false);
+                if (fs.empty()) fs = { { cat(CT(rt), " "), "" } };
+                for (auto &[ct, member] : fs) {
+                    auto path = member.empty() ? fn : cat(fn, ".", member);
+                    auto base = member.empty() ? cat(pn, "_", fn) : cat(pn, "_", fn, "_", member);
+                    auto m = decls ? Unique2(base) : base;
+                    add(cat(ct, m));
+                    Append(sets, " ", pn, ".", path, " = ", m, ";");
+                }
+            }
+            if (decls) Append(paramcopies, "    ", CT(pt->ref->sub), " ", pn, ";", sets, "\n");
         } else if (IsResz(pt)) {
             // By-value resizable: the header (or frame object) by value
             // plus its stack (C.3).

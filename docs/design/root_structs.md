@@ -245,8 +245,7 @@ Do not promise zero overhead based only on an inlined benchmark. Keep existing
 For initial root support, report material regressions explicitly and fix basic
 integration with existing optimizations before calling the feature complete.
 
-Known global owners now have an additional optimization; more general call
-lowering remains deferred:
+Two call lowerings improve on passing the descriptor's address:
 
 1. **Known-owner specialization.** Where all incoming calls prove exactly
    one global owner, accesses use that owner's fields and component caches.
@@ -254,12 +253,12 @@ lowering remains deferred:
    Preserving local-owner identity across emitted call boundaries remains future work.
    A unique type is not proof of a unique live instance: repeated declarations,
    recursion, worker instances, aliases and reentrancy must be considered.
-2. **Field-by-field lowering.** Treat an owner as component locals and pass the
-   required headers, stack handles and field addresses as separate arguments.
-   This may recover today's pool calling convention. Preserve writes and owner
-   identity; scalar copies of mutable fields are not a substitute for shared
-   locations. Materialize a descriptor when addressability or reference storage
-   requires one. Measure register pressure, argument count and code growth.
+2. **Field-by-field lowering.** Pass the headers, stack handles and component
+   addresses a descriptor holds as separate arguments, which is the pool
+   calling convention. Writes still go through those addresses, so owner
+   identity is preserved. A parameter whose reference is stored, returned or
+   captured keeps the descriptor. See
+   [field-by-field root parameters](#field-by-field-root-parameters).
 
 Keep the v1 language contract independent of these ABI strategies so that
 further optimizations do not require user code changes.
@@ -471,12 +470,38 @@ singleton assumption about a root type is needed: several instances are valid,
 and a helper shared by different owners retains its descriptors.
 
 This extension specializes accesses to proven **global** owners. Local owners
-still benefit from existing Goose inlining/alias projection; preserving their
-identity across an emitted function boundary would need a different calling
-interface or additional specialization. Mutable, captured, stored, optional
-and otherwise opaque root references are conservative, as are implicit formatting
-and tag-dispatch entry points. The restriction on Goose inlining into recursive
-functions remains unchanged.
+still benefit from existing Goose inlining/alias projection, and from the
+field-by-field interface below; preserving their identity across an emitted
+function boundary would need additional specialization. Mutable, captured,
+stored, optional and otherwise opaque root references are conservative, as are
+implicit formatting and tag-dispatch entry points. The restriction on Goose
+inlining into recursive functions remains unchanged.
+
+### Field-by-field root parameters
+
+A root reference parameter that its function only projects, aliases or
+forwards to another such parameter is passed as its descriptor's members: each
+resizable component's header and stack, as a fat reference parameter is
+(`ParamFields`), and each other component's address. The body rebuilds the
+descriptor in a local that its projections read. An owner's descriptor never
+changes once the owner is made, so the copy stands for it while the call
+runs. A parameter that its function returns, stores, captures, hands to a
+builtin or to an entry point with a fixed interface (exports, workers,
+formatting and tag dispatch), or forwards to a parameter that keeps its
+descriptor, keeps the descriptor's address (`FindSplitRootParams` in
+`src/codegen_frames.h`). A parameter proven to name one global owner keeps the
+one pointer, which its body does not read. `test/codegen/root_split_params.goose`
+covers both kinds.
+
+Against the descriptor-pointer interface, on the slot and slice pool
+microbenchmarks at Goose O1/O2 (October 2026), this is a few percent faster on
+`slot_pool` under TinyCC and within run-to-run noise elsewhere. The remaining
+distance to `reusable` is not the calling interface. Under TinyCC, the slot
+pool pays for checks the builtin skips (a pop after its own length test, an
+index into `items` from the freelist) and for temporaries. The slice pool's span
+tree is checked Goose code, where `reusable[]` calls the runtime's C
+(`gs_spans_*`). The JIT compiles that runtime C natively, so the gap there is
+about 2.5x on the fragmented and resize workloads.
 
 Validation covers recursive forwarding, a recursive helper used by multiple
 globals, independent local pools, aliasing owner parameters, separately passed
@@ -539,9 +564,10 @@ small regressions alone do not require retaining a language-level allocator.
   initialization, iteration, N=0, and practical reservation limits. This does
   not imply resizable or runtime-length arrays of owners. Do not choose an
   arbitrary small-N language limit before evaluating costs.
-* **Local-owner specialization and field-by-field call lowering.** Extend the
-  implemented global-owner optimization while preserving addressability and
-  alias semantics and minimizing indirections.
+* **Local-owner specialization.** Extend the implemented global-owner
+  optimization while preserving addressability and alias semantics and
+  minimizing indirections. Field-by-field call lowering is implemented (see
+  [field-by-field root parameters](#field-by-field-root-parameters)).
 * **Owning factory results.** Construct directly into several caller-provided
   destinations, without copying a descriptor and presenting it as a move.
   General copying, reassignment and moving need separate semantics.

@@ -205,10 +205,14 @@ inline void CodeGen::EmitArg(FnSpec *sp, size_t i, Node *node, vector<string> &a
     // A value read before later arguments that run statements lands in a
     // temp, as one passed by its address always does; otherwise C copies
     // the expression's value into the parameter at the call (GenOperandVal).
+    // A root descriptor never changes once made, so one named outright
+    // passes the members it holds now.
     auto x = GenXD(node, pt);
-    auto value = later || IsLargeFixed(pt) || (HasStmts(node) && !IsCName(x)) ? Snapshot(pt, x)
-                                                                              : x;
+    auto named = splitroots.count(sp->params[i]) && !NamedRootDesc(x).empty();
+    auto value = !named && (later || IsLargeFixed(pt) || (HasStmts(node) && !IsCName(x)))
+                 ? Snapshot(pt, x) : x;
     if (IsLargeFixed(pt)) args.push_back(cat("&", value));
+    else if (splitroots.count(sp->params[i])) PushRootMembers(args, pt, value);
     else PushArg(args, pt, false, value);
 }
 

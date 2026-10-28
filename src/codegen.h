@@ -849,6 +849,12 @@ struct CodeGen {
     // mutable/captured references and merged owners retain their descriptors.
     unordered_map<const VarDef *, VarDef *> knownrootparams;
     void FindKnownRootParams();
+    // Root parameters passed as their descriptor's members (SigParams), whose
+    // body rebuilds the descriptor in a local of its own.
+    set<const VarDef *> splitroots;
+    void FindSplitRootParams();
+    static string NamedRootDesc(const string &v);
+    void PushRootMembers(vector<string> &args, TypeExpr *t, string v);
     void FindRefAliases(FnSpec *sp);
     const VarDef *AliasTarget(VarDef *d, Node *init, Node *&path);
     static bool HandedRef(Node *n);
@@ -1471,6 +1477,7 @@ struct CodeGen {
         for (auto sp : livespecs)
             for (auto fv : sinfo[sp].freevars) capturedvars.insert(fv);
         FindKnownRootParams();
+        FindSplitRootParams();
         // Zero means "no long-distance return in flight", which is also the
         // state every propagating function's ordinary exit leaves behind.
         if (!fromids.empty()) data += "static GS_TLS int32_t gs_rf;\n";

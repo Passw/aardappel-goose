@@ -1875,6 +1875,28 @@ def main():
         else:
             r.fail("root call caches", "\n".join(body(n) for n in ("pair", "outer", "mixed", "direct")))
     r.show_task(root_call_caches)
+    # A root reference the callee only projects or forwards arrives as its
+    # descriptor's members; one it returns, stores or captures, or that is
+    # forwarded to such a callee, as the descriptor's address.
+    def root_split_params():
+        for opt in (0, 2):
+            cfile = gendir / f"root_split_params-O{opt}-shapes.c"
+            code, out, err = r.goose(f"-O{opt}", "-o", cfile, HERE / "codegen" / "root_split_params.goose")
+            if code != 0:
+                r.fail(f"root split params O{opt}", out + err)
+                continue
+            text = cfile.read_text()
+            sigs = {m[1]: m[2] for m in re.finditer(r"^static [^\n;(]*\b(\w+?)_g(?:_\d+)?\(([^\n]*)\) \{$",
+                                                    text, re.MULTILINE)}
+            split = ("fill", "forward", "aliased", "deep")
+            whole = ("via_same", "stored", "captured")
+            ok = all(n in sigs and "_first_g_hdr" in sigs[n] and "r_S_g" not in sigs[n] for n in split)
+            ok &= all(n in sigs and "r_S_g s_g" in sigs[n] and "_first_g_hdr" not in sigs[n] for n in whole)
+            if ok:
+                r.ok(f"root split params O{opt}")
+            else:
+                r.fail(f"root split params O{opt}", "\n".join(f"{n}: {s}" for n, s in sigs.items()))
+    r.show_task(root_split_params)
     # Fields nothing can move are member stores, not stores through a
     # pointer taken first (StableDest).
     def member_stores():

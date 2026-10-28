@@ -159,6 +159,9 @@ inline void CodeGen::DerefLoc(Loc &lv) {
     nl.t = r.sub;
     nl.val = true;
     nl.s = PointeeLv(rv, r.sub);
+    if (IsRoot(r.sub)) {
+        if (auto desc = NamedRootDesc(rv); !desc.empty()) nl.s = desc;
+    }
     nl.hlen = lv.hlen;
     nl.viaref = lv.viaref;
     lv = nl;
@@ -283,7 +286,8 @@ inline CodeGen::Loc CodeGen::VarLoc(VarDef *vd) {
         return l;
     }
     l.val = true;
-    l.s = fvptr.count(vd) ? cat("(*", name, ")") : name;
+    // A split root parameter's name is the body's copy of the descriptor.
+    l.s = splitroots.count(vd) ? cat("(&", name, ")") : fvptr.count(vd) ? cat("(*", name, ")") : name;
     l.viaref = vd->isvar && vd->type->kind == TY_REF;
     if (PrefVar(vd)) {
         l.ispref = true;

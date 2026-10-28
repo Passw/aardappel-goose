@@ -496,9 +496,11 @@ covers both kinds.
 Against the descriptor-pointer interface, on the slot and slice pool
 microbenchmarks at Goose O1/O2 (October 2026), this is a few percent faster on
 `slot_pool` under TinyCC and within run-to-run noise elsewhere. The remaining
-distance to `reusable` is not the calling interface. Under TinyCC, the slot
-pool pays for checks the builtin skips (a pop after its own length test, an
-index into `items` from the freelist) and for temporaries. The slice pool's span
+distance to `reusable` was not the calling interface. Under TinyCC, the slot
+pool paid for a pop's check right after its own length test, for temporaries
+and for struct copies, which general codegen changes have since removed
+([slot_pool.md](../../bench/slot_pool.md)); the index into `items` from the
+public freelist keeps its check. The slice pool's span
 tree is checked Goose code, where `reusable[]` calls the runtime's C
 (`gs_spans_*`). The JIT compiles that runtime C natively, so the gap there is
 about 2.5x on the fragmented and resize workloads.

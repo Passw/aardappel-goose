@@ -20,13 +20,13 @@ application work between operations.
 
 | Workload | Bytes | O1 Clang | O1 TinyCC | O1 JIT total | O2 Clang | O2 TinyCC | O2 JIT total |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| append | 8 | 1.034 | 0.976 | 1.030 | 0.959 | 0.957 | 1.039 |
-| append | 128 | 0.959 | 0.979 | 1.003 | 0.983 | 0.963 | 1.037 |
-| lifo | 8 | 0.854 | 0.955 | 1.032 | 0.842 | 0.971 | 1.002 |
-| lifo | 128 | 0.926 | 0.945 | 1.086 | 0.932 | 0.989 | 1.007 |
-| scattered | 8 | 0.926 | 0.962 | 1.031 | 0.921 | 0.972 | 1.045 |
-| scattered | 128 | 0.902 | 0.975 | 0.939 | 0.917 | 1.008 | 0.990 |
-| Geometric mean | | 0.932 | 0.965 | 1.019 | 0.924 | 0.976 | 1.020 |
+| append | 8 | 1.029 | 0.968 | 1.029 | 0.981 | 0.973 | 1.033 |
+| append | 128 | 0.990 | 0.996 | 1.012 | 0.964 | 0.997 | 1.004 |
+| lifo | 8 | 0.861 | 0.939 | 1.001 | 0.872 | 0.926 | 1.009 |
+| lifo | 128 | 0.904 | 0.986 | 1.095 | 0.879 | 0.983 | 1.066 |
+| scattered | 8 | 0.913 | 0.952 | 0.990 | 0.888 | 0.962 | 0.988 |
+| scattered | 128 | 0.911 | 1.011 | 0.936 | 0.873 | 1.012 | 0.920 |
+| Geometric mean | | 0.933 | 0.975 | 1.009 | 0.908 | 0.975 | 1.002 |
 
 Standalone TinyCC measures execution only. **JIT total** includes Goose
 compilation, TinyCC compilation and execution at the stated optimization level;
@@ -66,4 +66,4 @@ check (bounds-check elimination), pops, pushes and element reads and stores keep
 no temporaries they do not need, a small struct variable is stored as one
 integer, and `i < 0 || i >= items.len` is one unsigned comparison. The index
 check on a slot popped from the public freelist stays. JIT totals, which
-include compiling each program, are about 2% above the builtin.
+include compiling each program, are at parity on average.

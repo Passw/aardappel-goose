@@ -996,8 +996,9 @@ inline bool CodeGen::BulkDefaultLoop(ForLoop *loop) {
         L("int64_t ", limit, " = ", GenX(end), ";");
         L("if (", limit, " > ", first, ") {");
         ind++;
-        L("if ((uint64_t)", limit, " > GS_STACK_RESERVE / ", esz,
-          ") gs_abort(GS_E_ARRAYLEN, ", LocArgs(loop->line), ");");
+        // The loop would have run into the guard gap; report it the same way.
+        L("if ((uint64_t)", limit, " > GS_STACK_RESERVE / ", esz, ") gs_stack_overflow(",
+          Top(lv.stk), ");");
         L("GS_MEMZERO(", Top(lv.stk), ", (size_t)((", limit, " - ", first, ") * ", esz, "));");
         Bump(lv.stk, cat("(", limit, " - ", first, ") * ", esz));
         L(view.lenlv, " = ", limit, ";");

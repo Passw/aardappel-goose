@@ -266,6 +266,18 @@ static size_t gs_overflow_text(char *buf, const gs_region *r) {
     return (size_t)(p - buf);
 }
 
+GS_API GS_NORETURN void gs_stack_overflow(const void *at) {
+    for (long i = 0; i < gs_nregions; i++) {
+        const gs_region *r = &gs_regions[i];
+        if ((uintptr_t)at - (uintptr_t)r->base < r->size) {
+            char msg[GS_OVERFLOW_TEXT];
+            fwrite(msg, 1, gs_overflow_text(msg, r), stderr);
+            gs_end(1);
+        }
+    }
+    gs_panic("data stack overflow");
+}
+
 /* The calling thread program's registry, empty, as it starts. */
 static void gs_regions_begin(int64_t capacity) {
     gs_regions_cap = (long)capacity;

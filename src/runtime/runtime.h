@@ -215,6 +215,9 @@ GS_API GS_NORETURN void gs_abort(int err, const char *file, int line);
 GS_API GS_NORETURN void gs_abort_msg(const uint8_t *msg, int64_t len, const char *file,
                                      int line);
 GS_API GS_NORETURN void gs_exit(int64_t code);
+/* Growth from the data stack whose top is `at` that no region could hold,
+   reported as the fault handler reports an overrun into the guard gap. */
+GS_API GS_NORETURN void gs_stack_overflow(const void *at);
 GS_API GS_NORETURN void gs_idxfail(int64_t i, int64_t n, const char *file, int line);
 GS_API GS_NORETURN void gs_divfail(const char *file, int line);
 GS_API GS_NORETURN void gs_divovf(const char *file, int line);

@@ -652,7 +652,13 @@ inline CodeGen::Loc CodeGen::IndexLoc(Loc lv, Node *idxnode, Line ln, bool nobc)
         v.elems = elems;
         v.len = len;
     }
-    auto idx = GenPure(idxnode);
+    string idx;
+    if (locnow && Is<Ident>(idxnode)) {
+        idx = GenX(idxnode);
+        if (!IsCName(idx)) idx = Snapshot(idxnode->exprtype, idx);
+    } else {
+        idx = GenPure(idxnode);
+    }
     if (lv.t->kind == TY_SLICE) {
         // MSVC /O2 can discard stores through a copied slice header while
         // retaining earlier values in its fixed-array owner (typecheck's
@@ -807,6 +813,29 @@ inline CodeGen::Loc CodeGen::GenLoc(Node *n) {
         l.val = true;
     }
     return l;
+}
+
+// GenLoc for a caller that uses the location before emitting any statement
+// (locnow). A path that emits statements of its own may change an index
+// variable between reading it and using the location, so it takes the
+// ordinary form.
+inline CodeGen::Loc CodeGen::GenLocNow(Node *n) {
+    auto saved = locnow;
+    locnow = !HasStmts(n);
+    auto lv = GenLoc(n);
+    locnow = saved;
+    return lv;
+}
+
+// Whether evaluating n emits no statement, writes nothing and cannot fail,
+// so that it can be evaluated after a destination it is stored to: a
+// variable of a fixed type, a constant, or what Speculatable accepts
+// without any bounds check.
+inline bool CodeGen::QuietValue(Node *n) {
+    if (auto id = Is<Ident>(n)) return id->vdef && n->exprtype && IsFix(n->exprtype);
+    if (Is<IntLit>(n) || Is<FltLit>(n) || Is<BoolLit>(n) || Is<NullLit>(n)) return true;
+    int budget = 16;
+    return Speculatable(n, false, false, budget);
 }
 
 // Whether a destination's C lvalue names the same storage wherever in its
@@ -1240,6 +1269,43 @@ inline bool CodeGen::BranchChain(Node *n) {
     return ChainOp(n) || BranchCall(n);
 }
 
+// Whether b is a range test of a signed variable x against a count y that
+// cannot be negative -- `x < 0 || x >= y`, or `x >= 0 && x < y` -- which is
+// one unsigned comparison of the two: a negative x converts to above any
+// such y. y is a constant or a length (or capacity) read along a path that
+// cannot fail.
+inline bool CodeGen::RangeTest(Binary *b, Node *&x, Node *&y) {
+    auto ors = b->op == T_OROR;
+    auto cmp = [&](Node *n, TType op, TType flipped, Node *&l, Node *&r) {
+        auto c = Is<Binary>(n);
+        if (!c || (c->op != op && c->op != flipped)) return false;
+        auto t = c->left->exprtype ? OperandT(c->left->exprtype) : nullptr;
+        if (!t || t->kind != TY_INT || IntRange(t->intstorage).first >= 0 ||
+            t->intstorage == IS_VARINT)
+            return false;
+        l = c->op == op ? c->left : c->right;
+        r = c->op == op ? c->right : c->left;
+        return true;
+    };
+    Node *x0, *z, *x1, *n;
+    if (!cmp(b->left, ors ? T_LT : T_GTEQ, ors ? T_GT : T_LTEQ, x0, z) ||
+        !cmp(b->right, ors ? T_GTEQ : T_LT, ors ? T_LTEQ : T_GT, x1, n))
+        return false;
+    auto zero = Is<IntLit>(z);
+    auto xi = Is<Ident>(x0);
+    if (!zero || zero->val != 0 || !xi || !xi->vdef || !SamePath(x0, x1)) return false;
+    if (auto k = Is<IntLit>(n); k && !k->uns && k->val >= 0) {
+        x = x0;
+        y = n;
+        return true;
+    }
+    auto d = Is<Dot>(n);
+    if (!d || (d->member != B_LEN && d->member != B_CAP) || !CheckFreePath(d->obj)) return false;
+    x = x0;
+    y = n;
+    return true;
+}
+
 // A branch to `lbl` taken where n's truth value is `when`, falling through
 // where it is not. A && or || (ChainOp) is a chain of branches on its
 // operands, the right one's statements running only where the left did not
@@ -1255,7 +1321,9 @@ inline bool CodeGen::BranchChain(Node *n) {
 inline void CodeGen::GenBranch(Node *n, bool when, string lbl, int exitscope) {
     if (auto u = Is<Unary>(n); u && u->op == T_NOT)
         return GenBranch(u->child, !when, lbl, exitscope);
-    if (auto b = ChainOp(n)) {
+    auto b = ChainOp(n);
+    Node *rx = nullptr, *ry = nullptr;
+    if (b && !RangeTest(b, rx, ry)) {
         // A && is false, and a || true, as soon as one operand is.
         if ((b->op == T_ANDAND) != when) {
             GenBranch(b->left, when, lbl, exitscope);
@@ -1303,6 +1371,14 @@ inline void CodeGen::GenBranch(Node *n, bool when, string lbl, int exitscope) {
     };
     if (auto bl = Is<BoolLit>(n)) {
         if (bl->val == when) jump("");
+        return;
+    }
+    if (rx) {
+        // Both operands read without effect or failure, so they are taken
+        // whatever the left comparison gave.
+        auto x = cat("(uint64_t)(int64_t)(", GenX(rx), ") ", b->op == T_OROR ? ">=" : "<",
+                     " (uint64_t)(int64_t)(", GenX(ry), ")");
+        jump(when ? x : cat("!(", x, ")"));
         return;
     }
     PushSc(SC_PLAIN);

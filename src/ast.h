@@ -1117,6 +1117,9 @@ NODE(Call)
     // range_index/free_slice/realloc_slice: the slice is not provably the receiver's,
     // so codegen checks at run time that it lies inside the pool (§5.4).
     bool poolcheck = false;
+    // pop: the array is provably non-empty here (bce.h); codegen omits the
+    // emptiness check.
+    bool nobc = false;
     TypeExpr *qtype = nullptr;  // qlimit<T>: T, which names the queue (§11.2).
     const string *shaderblob = nullptr;  // embed_shader's compiled blob or embed_file's bytes, in Ast::shaders.
     Call(Line l, Node *_callee) : Node(l, NKind), callee(_callee) {}

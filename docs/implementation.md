@@ -72,7 +72,7 @@ single translation unit, included in the order the driver lists them.
 | Resolve | `resolve.h` (`ResolveTypeNames`) | type names as written | struct/enum/generic kinds, aliases substituted away |
 | Typecheck | `typecheck*.h` (`TypeCheckProgram`) | the `Ast` | one `FnSpec` per specialization with a cloned, annotated body; `StructInst`/`EnumInst`; `VarDef`s; the store record; every diagnostic of §3--§11; the shader blobs `embed_shader` compiles (`gfx.h`, `shaderc.c`) |
 | Optimize | `optimize.h`, `optimize_basecase.h`, `optimize_tre.h`, `optimize_loops.h`, `optimize_reassoc.h` (`Optimizer`) | live specializations | bodies rewritten in place (inlined, folded, loops), liveness and use counts, loop shapes (`ForLoop::stripk`, `sumred`, `While::countdown`) |
-| BCE | `bce.h` (`BCE::RunAll`) | live specializations | `Index::nobc`, `SliceExpr::nobc`, `ForLoop::fixedlen` and `lenbound`, per-loop `hoistrefs` and `hoistfields` |
+| BCE | `bce.h` (`BCE::RunAll`) | live specializations | `Index::nobc`, `SliceExpr::nobc`, `Call::nobc` (a `pop`), `ForLoop::fixedlen` and `lenbound`, per-loop `hoistrefs` and `hoistfields` |
 | Codegen | `codegen*.h` (`CodeGen`) | live specializations, globals | one C file, with `src/runtime/` (or the part of it that a program's unit holds) around it |
 | JIT | `jit.h` | the C text | the program run in-process through libtcc, when no `-o` was given |
 
@@ -3995,7 +3995,12 @@ presence of aliases (`Snapshot`, `IndexLoc`, `GenSlice`, `Assign::CgStmt`,
   Because the store is written like the loads of the same element, gcc's
   loop invariant motion also sees it as one location. Only then does gcc
   keep an element that a loop reads and writes (`a[i] = a[i] + x` in a
-  loop over `j`) in a register, which lets the loop vectorize. Whole
+  loop over `j`) in a register, which lets the loop vectorize. A right
+  side that runs nothing, writes nothing and cannot fail (a variable, a
+  constant: `QuietValue`) cannot move any destination either, and is
+  stored as written too; a destination used before any statement runs
+  keeps an index variable in place rather than reading it into a
+  temporary (`GenLocNow`). Whole
   resizable assignment has the clear-before-construction semantics of
   spec §4.4; overlapping permitted copies have memmove semantics.
 * A range/count `for` samples its bounds once, before iteration, and runs
@@ -4670,7 +4675,9 @@ nothing (`HasKillEffects`), since the comparison ran against pre-kill
 values. Changes to locals that the condition declares itself, such as the
 parameter of a predicate inlined into it, do not count, since its
 comparisons cannot name them. A completed `pop` proves the old length was
-at least one. A completed `pop_n(n)` proves `0 <= n <= old length`
+at least one, and a `pop` where the facts already put the length at one or
+more loses its emptiness check (`Call::nobc`), as after
+`if s.len != 0 { s.pop() }`. A completed `pop_n(n)` proves `0 <= n <= old length`
 (`CheckedFacts`), and a constant `n` steps the length down exactly. A
 `resize` states the new length when the count's term survived the
 evaluation of the fill value. Neither `pop_n` nor `resize` states anything

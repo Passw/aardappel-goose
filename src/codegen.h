@@ -964,6 +964,13 @@ struct CodeGen {
     bool SameCheck(Index *a, Index *b);
     void EmitHoistedCheck(Index *ta, Index *ea, const string &c);
     Loc GenLoc(Node *n);
+    // Set while GenLoc builds a location its caller uses before emitting
+    // any statement, over a path that emits none itself: an index held in a
+    // variable then stays the variable, where it is otherwise read into a
+    // temporary that later statements cannot change (IndexLoc).
+    bool locnow = false;
+    Loc GenLocNow(Node *n);
+    bool QuietValue(Node *n);
     bool StableDest(Node *n);
     string BytesTemp(string &stk);
     string RzTemp(TypeExpr *t, string &stk);
@@ -991,6 +998,7 @@ struct CodeGen {
     string GenTruth(Node *n);
     bool SpeculativeForm(Binary *b);
     Binary *ChainOp(Node *n);
+    bool RangeTest(Binary *b, Node *&x, Node *&y);
     InlineBlock *BranchCall(Node *n);
     bool BranchChain(Node *n);
     void GenBranch(Node *n, bool when, string lbl, int exitscope = -1);
@@ -1065,6 +1073,7 @@ struct CodeGen {
 
     void EmitValStore(const string &stk, TypeExpr *t, const string &x);
     void StoreWhole(const string &p, TypeExpr *t, const string &x);
+    bool WholeStore(TypeExpr *t);
     void EmitLenCheck(IntStorage ls, const string &n);
     void EmitLenStore(const string &stk, IntStorage ls, const string &n);
     void EmitArrayCount(const string &stk, TypeExpr *at, const string &lenlv, const string &n,

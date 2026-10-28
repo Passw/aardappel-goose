@@ -1,7 +1,8 @@
 // Goose compiler — bounds-check elimination. Runs between the optimizer and
 // codegen over every live specialization body (plus global initializers), and
 // marks Index / SliceExpr nodes whose runtime check provably cannot fire
-// (Index::nobc / SliceExpr::nobc); codegen then omits those checks. The pass
+// (Index::nobc / SliceExpr::nobc), and pops of an array known to be
+// non-empty (Call::nobc); codegen then omits those checks. The pass
 // never changes semantics: an elided check is one that could not have aborted.
 //
 // The analysis is a flow-sensitive difference-constraint domain over four
@@ -3674,8 +3675,12 @@ inline bool Call::BceWalk(BCE &b) {
             case B_POP: {
                 // A pop that returns proves its own precondition: popping an
                 // empty array aborts (§9.3), so the length was at least one
-                // and the new one is exactly one less.
+                // and the new one is exactly one less. Where the facts already
+                // put the length at one or more, that check cannot fire.
                 auto lt = b.mode == BCE::M_KILLS || !rn ? BCE::Term {} : b.LenTermOf(rn);
+                if (b.mode == BCE::M_JUDGE && lt.ok &&
+                    b.Query(BCE::Zero(), lt.b, BCE::SatSub(lt.off, 1)))
+                    nobc = true;
                 b.GrowShrinkKill(rn, -1, -1);
                 if (lt.ok && lt.b.kind != BCE::BK_ZERO)
                     b.AddFactB(BCE::Zero(), lt.b, lt.off - 1);

@@ -26,9 +26,7 @@ inline void CodeGen::EmitValStore(const string &stk, TypeExpr *t, const string &
 // C compiler assemble it in a register first.
 inline void CodeGen::StoreWhole(const string &p, TypeExpr *t, const string &x) {
     auto sz = FixedSize(t);
-    auto agg = t->kind == TY_STRUCT || t->kind == TY_VARIANT || t->kind == TY_ARRAY ||
-               (t->kind == TY_ENUM && !t->enu->varmode);
-    if (!agg || (sz != 2 && sz != 4 && sz != 8)) {
+    if (!WholeStore(t)) {
         L("*(", CT(t), " *)", p, " = ", x, ";");
         return;
     }
@@ -41,6 +39,14 @@ inline void CodeGen::StoreWhole(const string &p, TypeExpr *t, const string &x) {
     L(sz == 8 ? "uint64_t " : sz == 4 ? "uint32_t " : "uint16_t ", w, ";");
     L("GS_MEMCPY(&", w, ", &", v, ", ", sz, ");");
     L("GS_MEMCPY(", p, ", &", w, ", ", sz, ");");
+}
+
+// Whether StoreWhole stores a value of type t as one integer of its width.
+inline bool CodeGen::WholeStore(TypeExpr *t) {
+    auto sz = FixedSize(t);
+    auto agg = t->kind == TY_STRUCT || t->kind == TY_VARIANT || t->kind == TY_ARRAY ||
+               (t->kind == TY_ENUM && !t->enu->varmode);
+    return agg && (sz == 2 || sz == 4 || sz == 8);
 }
 
 inline void CodeGen::EmitLenCheck(IntStorage ls, const string &n) {

@@ -344,30 +344,34 @@ inline vector<string> CodeGen::EmitBuiltin(Call *c, Dst d0) {
             auto v = ArrayView(lv);
             auto elem = v.elem;
             auto esz = FixedSize(elem);
-            if (lv.t->arr->akind != A_LIMITED) NoteLen(lv.stk, v.lenlv, lv.lenroot);
-            auto nl = T();
-            L("int64_t ", nl, " = ", v.len, " - 1;");
-            // On empty, the stored length would wrap (limited arrays) or
-            // the stack top drop below the elements (grow-shrink).
-            L("if (", nl, " < 0) gs_abort(GS_E_POP, ", LocArgs(ln), ");");
-            L(v.lenlv, " = (", LenCast(lv), ")", nl, ";");
             auto ak = lv.t->arr->akind;
             string at;
             if (ak == A_GROWSHRINK || ak == A_GROW) {
+                NoteLen(lv.stk, v.lenlv, lv.lenroot);
+                // On empty, the stack top would drop below the elements.
+                if (!c->nobc)
+                    L("if (", v.len, " <= 0) gs_abort(GS_E_POP, ", LocArgs(ln), ");");
+                L(v.lenlv, "--;");
                 // The array tops its stack: the element region ends at top.
                 L(TopW(lv.stk), " -= ", esz, ";");
                 at = Top(lv.stk);
             } else {
+                auto nl = T();
+                L("int64_t ", nl, " = ", v.len, " - 1;");
+                // On empty, the stored length would wrap.
+                if (!c->nobc) L("if (", nl, " < 0) gs_abort(GS_E_POP, ", LocArgs(ln), ");");
+                L(v.lenlv, " = (", LenCast(lv), ")", nl, ";");
                 at = cat("(", ElemAddr(v, nl), ")");
             }
-            // A relative-reference element leaves as the plain reference it
-            // loads as (§3.9): its offset is measured from the slot it
-            // leaves, whose bytes nothing has written over yet.
+            // The element leaves as a read of the slot it leaves, whose
+            // bytes nothing writes over until the array grows again: a
+            // destination stores it at once, and an operand followed by
+            // statements is read into a temporary first (GenOperandVal). A
+            // relative-reference element is the plain reference it loads as
+            // (§3.9), its offset measured from that slot.
             if (IsRelRef(elem))
                 return { LoadLoc(BytesLoc(at, elem, lv), c->rettypes[0], ln) };
-            auto tv = T();
-            FixedLocal(elem, tv, cat("*(", CT(elem), " *)", at));
-            return { tv };
+            return { cat("(*(", CT(elem), " *)", at, ")") };
         }
         case B_POP_N: {
             auto lv = RecvLoc(an[0]);
@@ -617,7 +621,10 @@ inline string CodeGen::ElemValue(Node *n, TypeExpr *elem) {
         return ev;
     }
     if (IsBytesT(elem) || HasRelRef(elem)) return "";
-    return Snapshot(elem, GenXD(n, elem));
+    // A local variable keeps its value up to the store: only the array's
+    // own bookkeeping runs in between.
+    auto x = GenXD(n, elem);
+    return Is<Ident>(n) && IsCName(x) ? x : Snapshot(elem, x);
 }
 
 // Writes the fixed-size element `n`, given what ElemValue made of it, into
@@ -651,6 +658,16 @@ inline vector<string> CodeGen::EmitPush(vector<Node *> &an, Line ln) {
     } else {
         assert(!lv.stk.empty());
         NoteLen(lv.stk, v.lenlv, lv.lenroot);
+        // A value evaluated ahead goes out at the top, and the element is
+        // then the one just below it: a read of the top a destination takes
+        // at once, and an operand followed by statements into a temporary
+        // (GenOperandVal), as a pop's value is.
+        if (!ev.empty() && !IsRelRef(elem)) {
+            EmitValStore(lv.stk, elem, ev);
+            L(v.lenlv, "++;");
+            ref = cat("((", CT(elem), " *)(", Top(lv.stk), " - ", FixedSize(elem), "))");
+            return { NewElemResult(ref, elem, lv, ln) };
+        }
         auto e = T();
         if (IsBytesT(elem)) {
             L("uint8_t *", e, " = ", Top(lv.stk), ";");

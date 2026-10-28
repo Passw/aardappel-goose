@@ -306,7 +306,7 @@ struct CodeGen {
 
     static int64_t IntSize(IntStorage s) { return IntBits(s) / 8; }
 
-    static const char *IntCT(IntStorage s);
+    static const char *IntCT(IntStorage s, bool unaligned = true);
     static const char *IntSfx(IntStorage s);
     static const char *RelCT(IntStorage s, bool uns = false);
     static const char *RelCT(TypeExpr *rt);
@@ -357,7 +357,7 @@ struct CodeGen {
     bool corebuiltins = false;
 
     void EmitCoreTypes();
-    string CT(TypeExpr *t);
+    string CT(TypeExpr *t, bool unaligned = true);
     static bool StructLike(TypeExpr *t);
     string NameCT(TypeExpr *t);
     set<string> cdefined;    // Mangled names whose C body has been emitted.

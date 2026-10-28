@@ -4902,6 +4902,9 @@ storing or patching the length field.
 Generated scalar and pointer typedefs carry one-byte alignment on GCC and
 Clang. References and slices retain that alignment when a packed field's
 address escapes its containing struct; aggregate types use `#pragma pack(1)`.
+Their scalar and pointer members use naturally aligned types so C ABI
+classification recognizes members crossing an eight-byte boundary, including
+on Clang 18; packing still gives every field its byte-exact offset.
 
 Layout details needed for byte/C compatibility (`FixedSize`, `LayoutFields`,
 `LenStore`, `TagStore`):

@@ -3942,7 +3942,8 @@ What may cross is exactly what has a plain C shape:
   fixed-mode enums), by value as its packed C type;
 * `T&` to such a `T`, as a pointer;
 * `T[:]` of such a `T`, as a `{ data, len }` struct;
-* `u8[>..]&`, a builder C appends to through `gs_bld_append`.
+* `T[>..]&` of such a `T`, a builder C may write and append whole elements
+  to (`gs_bld_append` appends bytes to a `u8[>..]&`).
 
 Results are one scalar or flat fixed-size value, or nothing. Everything
 else (`varint`s, references inside structs, variable or resizable values

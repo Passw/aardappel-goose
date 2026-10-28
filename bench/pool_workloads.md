@@ -55,25 +55,51 @@ capture-free callbacks still permit leaf-call elimination. Both the old free
 spelling and `free_ref` showed the same larger gap when that safe optimization
 was disabled. Merkle's remaining gap is not explained by that wrapper.
 
-CacheSimulation remains a real regression: +27.4% in its timed window and
+CacheSimulation was a real regression: +27.4% in its timed window and
 process cycles for the mechanical migration. `alloc_copy` reduces the measured
 gap to about 23%, but does not make it negligible. Its published source therefore
-stays on the builtin. Graph's allocator runs during preparation (+16.2%), outside
+stays on the builtin; see below for the runtime span tree, which halves the gap
+but does not close it. Graph's allocator runs during preparation (+16.2%), outside
 its search timer; the search ranges overlap, while whole-process cost is +8.5%.
 Primes is +7.3% in its short timed window (+4.1% whole process). Existing migrated
 ports are retained; these measurements do not claim universal parity.
 
+## CacheSimulation on the runtime span tree
+
+Measured 2026-10-28, same machine and protocol (three copies, one warmup and
+three runs each, CPU 28, Clang 22.1.3 at LangArena's flags), after `slice_pool`
+moved its tree into the runtime (`gs_slice_pool_*`, the C `reusable[]` uses, in
+a copy that checks the `nodes` and `tree` fields it reads). Both sides are
+built by that compiler; the library side is the mechanical migration.
+
+| Workload | Observation | Builtin | Library | Ratio |
+|---|---|---:|---:|---:|
+| Etc::CacheSimulation | timed seconds | 0.898 | 0.989 | 1.101 |
+| Etc::CacheSimulation | whole-process seconds | 1.094 | 1.207 | 1.103 |
+| Etc::CacheSimulation | process cycles, millions | 4661 | 5142 | 1.103 |
+
+The gap is +10.1%, down from +27.4%, and the source stays on the builtin. The
+slice microbenchmarks are at parity under Clang, so what is left is in how
+CacheSimulation calls the pool (short strings, the pool passed down through
+`put` and `remove_oldest`); it has not been profiled yet. The samples are in
+the raw results below, under `runtime_span_tree`:
+
+```text
+python bench/pool_workloads.py --exe build/Release/goose.exe --arena C:/W/LangArena --kostya C:/W/kostya-benchmarks --out build/pool-apps-spans --construct-timer --only Etc::CacheSimulation --copies 3 --reps 3 --warmups 1 --cpus 28
+```
+
 ## Compiler and allocator costs
 
-The slice allocator has the same augmented B+ tree as `reusable[]`: first fit
+These were measured 2026-10-25, while the library's tree was Goose code. The
+slice allocator has the same augmented B+ tree as `reusable[]`: first fit
 in address order, adjacent-span coalescing, tail reuse, node recycling and root
 collapse. The tree-maintenance changes from `1ab1d26d` are on both sides.
 Differential tests compare placement and contents, including the 60,000-operation
 model. No bounds, containment, overflow or initialization checks were disabled.
 
-Tree helpers now take `nodes` and `tree` independently of the element type.
-LangArena emits one body each for `place`, `fix` and `delete`, instead of one per
-item type. Its C grows from 2,611,464 to 2,694,704 bytes (+3.2%), and its executable
+Tree helpers then took `nodes` and `tree` independently of the element type.
+LangArena emitted one body each for `place`, `fix` and `delete`, instead of one per
+item type. Its C grew from 2,611,464 to 2,694,704 bytes (+3.2%), and its executable
 from 1,272,320 to 1,293,312 bytes (+1.7%). An interleaved five-sample compile-only
 rerun after one warmup measured 1.012 → 1.062 billion process cycles (+4.9%), or
 0.242 → 0.254 seconds. Both emitted C files exactly match the runtime measurement
@@ -87,8 +113,9 @@ O1/O2 with native Clang, standalone TinyCC and compile-plus-run JIT timings.
 The final compiler and libraries reproduce all 48 microbenchmark C files except
 source paths/diagnostic line numbers; their original measurement fingerprints
 remain in the results. Native slot allocation is around parity. Slice allocation
-is about 6% slower on average at Clang O2 and 34% at TinyCC O2, with larger gaps
-in fragmented allocation and resize. Append is close on both backends.
+was then about 6% slower on average at Clang O2 and 34% at TinyCC O2, with larger
+gaps in fragmented allocation and resize; on the runtime span tree it is at
+parity under Clang and 7% slower under TinyCC ([slice matrix](slice_pool.md)).
 
 ## Reproduce
 

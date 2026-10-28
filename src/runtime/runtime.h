@@ -206,6 +206,7 @@ enum {
     GS_E_QBOUND,       /* a queue limit of zero or less */
     GS_E_ARRAYLEN,     /* array element count negative or beyond a data stack */
     GS_E_ARRAYSLICE,   /* a nonempty slice is not wholly inside the array */
+    GS_E_SPANTREE,     /* a stdlib slice_pool's nodes and tree are no span tree */
 };
 
 GS_API GS_NORETURN void gs_panic(const char *msg);

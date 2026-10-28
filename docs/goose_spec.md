@@ -3278,9 +3278,12 @@ These values can cross the boundary (with layouts per C.2):
   limited arrays, and fixed-mode ADTs), by value as its packed C type;
 * `T&` to such a `T`, as a pointer;
 * `T[:]` of such a `T`, as the slice struct (`{ data, len }`);
-* `u8[>..]&`, as the resizable's header plus its stack (`gs_rref`), which
-  C appends to through `gs_bld_append(ref, p, n)`. C compiled on its own,
-  such as a package's C, finds both in `goose.h` (docs/packages.md).
+* `T[>..]&` of such a `T`, as the resizable's header plus its stack
+  (`gs_rref`). C sees the elements as blocks of `T`'s packed size: it may
+  write the ones there are and append whole ones at the stack top, moving
+  the top and the header's count together, which `gs_bld_append(ref, p, n)`
+  does for a `u8[>..]&`. C compiled on its own, such as a package's C, finds
+  both in `goose.h` (docs/packages.md).
 
 A return is one scalar or flat fixed-size value by value, or nothing;
 references, slices and builders can only be parameters. Everything else
@@ -4783,8 +4786,8 @@ its resolution is described.
     function, an `extern "lib" { ... }` block binds its members from a shared
     library by name when the program starts, and `export fn` exposes a Goose
     function through a C-callable wrapper. The flat fixed-size types by
-    value, references and slices to them, and `u8[>..]&` builders can cross
-    the boundary where supported; other shapes are rejected at the
+    value, references and slices to them, and builders (`T[>..]&`) of them
+    can cross the boundary where supported; other shapes are rejected at the
     declaration.
 12. **Open syntax details** — DONE: both trailing-block parameter forms
     exist (the implicit `it` and `x =>`, §7.6), and `recursive fn` is the

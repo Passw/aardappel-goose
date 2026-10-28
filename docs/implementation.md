@@ -5464,14 +5464,15 @@ program calls.
 **The foreign boundary.** `CheckExternSpec` admits scalars and flat
 fixed-size values by value, including fixed-mode ADTs and limited arrays
 of static capacity. Parameters additionally admit plain non-optional
-references and slices of those values, and `u8[>..]&` builders. Results
-are at most one by-value scalar or flat fixed-size value: references,
-slices and builders cannot be returned by an extern. A builder argument
-uses `gs_rref { hdr, stk }`; C may append through `gs_bld_append` but may
-not shrink it, retain borrowed arguments beyond the call, or invalidate
-Goose's types, roots or lengths. These are obligations on C, not proofs
-the Goose compiler performs. Effect analysis assumes C may write passed
-storage and append to passed builders, but does not mutate unrelated
+references and slices of those values, and builders (`T[>..]&`) of them.
+Results are at most one by-value scalar or flat fixed-size value:
+references, slices and builders cannot be returned by an extern. A builder
+argument uses `gs_rref { hdr, stk }`, whatever its elements; C may write
+its elements and append whole ones at the stack top (`gs_bld_append` for
+bytes) but may not shrink it, retain borrowed arguments beyond the call, or
+invalidate Goose's types, roots or lengths. These are obligations on C, not
+proofs the Goose compiler performs. Effect analysis assumes C may write
+passed storage and append to passed builders, but does not mutate unrelated
 Goose globals. The builtin runtime shims obey the same boundary.
 
 `return ... from` uses one thread-local `int32_t gs_rf` (zero except between
@@ -6499,6 +6500,28 @@ returned to the stack: emptied nodes are chained for reuse, which keeps node
 numbers valid, and with them a worker's copy of the freelist. The emitted
 code itself keeps the element region's count and top, and fills in the
 default values.
+
+std's `slice_pool` (docs/stdlib.md) keeps the same tree in its `nodes` field,
+with the header in its `tree` field and node 0 left zero, and calls a copy of
+these functions: its externs `gs_slice_pool_*` and their `gs_spc_*` helpers,
+in `runtime_os.h`, where `gs_rref` is defined. Those fields are the
+program's to write, so the copy checks
+what it reads before it uses it: a node number must be one of the nodes past
+node 0, an entry count must fit the node it is read from as a leaf or inner
+node, the height must fit a path, and an entry moved into or out of a node
+must be one the node has room for or holds. A node reached at two levels of
+a path, or one the chain hands out while it is still in the tree, keeps
+every access inside the nodes: each count the copy writes fits a leaf, and
+the counts that index an inner node's children are checked where they are
+read. A check that fails aborts with `GS_E_SPANTREE`, without a Goose
+location (`gs_fail` with a NULL file). A wrong tree that passes them hands
+out wrong spans, which `slice_pool`'s own check against its length catches
+where they start past it. Sums of stored indices and counts wrap rather than
+overflow, and new nodes past the last are zeroed, as a pushed `node { .. }`
+would be. A `reusable[]` pool's freelist is out of the program's reach, so
+it keeps the unchecked functions, which measured 3-5% faster on fragmented
+and resize workloads under TinyCC and the JIT; the copy goes when
+`reusable[]` does.
 
 **The native layers** behind `gfx`, `audio`, `ui` and `physics` are not part
 of this runtime. They are packages (`docs/design/packages.md`) in

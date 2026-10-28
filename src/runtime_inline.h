@@ -219,6 +219,7 @@ R"GSRT(    GS_E_THREADID,     /* thread_wait on an unknown thread id */
     GS_E_QBOUND,       /* a queue limit of zero or less */
     GS_E_ARRAYLEN,     /* array element count negative or beyond a data stack */
     GS_E_ARRAYSLICE,   /* a nonempty slice is not wholly inside the array */
+    GS_E_SPANTREE,     /* a stdlib slice_pool's nodes and tree are no span tree */
 };
 
 GS_API GS_NORETURN void gs_panic(const char *msg);
@@ -358,10 +359,10 @@ static inline int gs_simd_detect(void) {
 }
 
 /* Detected at the first call and kept. Every thread computes the same
-   level, so a relaxed atomic is all a race between two first calls needs. */
-static inline int gs_simd_level(void) {
 )GSRT"
-R"GSRT(    static int level = -1;
+R"GSRT(   level, so a relaxed atomic is all a race between two first calls needs. */
+static inline int gs_simd_level(void) {
+    static int level = -1;
     int l = __atomic_load_n(&level, __ATOMIC_RELAXED);
     if (l < 0) {
         l = gs_simd_detect();
@@ -521,9 +522,9 @@ static int gs_memeq(const void *a, const void *b, size_t n) {
 
    In a release build every operation is a macro whose body is the
    expression the debug function would have returned. An optimizing backend
-   inlines either form to the same instruction, but a backend that does not
 )GSRT"
-R"GSRT(   inline (libtcc, or any -O0 build) would otherwise pay a call for every
+R"GSRT(   inlines either form to the same instruction, but a backend that does not
+   inline (libtcc, or any -O0 build) would otherwise pay a call for every
    arithmetic operation in the program — which measured as 13-37% of total
    runtime across the benchmarks.
 
@@ -684,9 +685,9 @@ static uint64_t gs_shr_u64(uint64_t a, int64_t n) { return a >> (n & 63); }
 #define gs_shl_i16(a, n) ((int16_t)((uint64_t)(a) << ((n) & 15)))
 #define gs_shr_i16(a, n) ((int16_t)((int64_t)(a) >> ((n) & 15)))
 
-#define gs_add_i32(a, b, f, l) ((int32_t)((int64_t)(a) + (int64_t)(b)))
 )GSRT"
-R"GSRT(#define gs_sub_i32(a, b, f, l) ((int32_t)((int64_t)(a) - (int64_t)(b)))
+R"GSRT(#define gs_add_i32(a, b, f, l) ((int32_t)((int64_t)(a) + (int64_t)(b)))
+#define gs_sub_i32(a, b, f, l) ((int32_t)((int64_t)(a) - (int64_t)(b)))
 #define gs_mul_i32(a, b, f, l) ((int32_t)((int64_t)(a) * (int64_t)(b)))
 #define gs_neg_i32(a, f, l)    ((int32_t)(-(int64_t)(a)))
 #define gs_shl_i32(a, n) ((int32_t)((uint64_t)(a) << ((n) & 31)))
@@ -883,9 +884,9 @@ static int64_t gs_f2ichk(double d, int f32, int64_t lo, int64_t hi, const char *
     if ((double)v != d) gs_asfail_f("changes the value", d, f32, type, file, line);
     return v;
 }
-static uint64_t gs_f2uchk(double d, int f32, const char *file, int line) {
 )GSRT"
-R"GSRT(    if (!(d >= 0 && d < 18446744073709551616.0))
+R"GSRT(static uint64_t gs_f2uchk(double d, int f32, const char *file, int line) {
+    if (!(d >= 0 && d < 18446744073709551616.0))
         gs_asfail_f("out of range", d, f32, "u64", file, line);
     uint64_t v = (uint64_t)d;
     if ((double)v != d) gs_asfail_f("changes the value", d, f32, "u64", file, line);
@@ -1062,14 +1063,14 @@ static void gs_thread_run(void (*entry)(uint8_t *), uint8_t *args) {
    runtime releases the regions after this. */
 static void gs_thread_release(void) {
     free(gs_gl);
-    gs_gl = NULL;
+)GSRT"
+R"GSRT(    gs_gl = NULL;
     free(gs_stks);
     gs_stks = NULL;
     gs_nstks = 0;
 }
 
-)GSRT"
-R"GSRT(static int64_t gs_thread_spawn(void (*entry)(uint8_t *), const void *args, int64_t argsize,
+static int64_t gs_thread_spawn(void (*entry)(uint8_t *), const void *args, int64_t argsize,
                                int contained) {
     return gs_thread_start(gs_thread_run, gs_thread_release, entry, args, argsize, contained);
 }
@@ -1270,6 +1271,7 @@ static const char *gs_errmsgs[] = {
     "queue limit of zero or less",
     "invalid array length",
     "slice not within this array",
+    "slice pool span tree is corrupt",
 };
 
 /* Ends the process with `code`, its streams flushed: exit() and every
@@ -1311,22 +1313,25 @@ static GS_TLS gs_contained *gs_contain;
    bytes at `msg` and the location after it. A contained worker's keeps the
    message, without the "goose runtime error: " every printed one starts
    with, and ends that worker; anything else's prints it and ends the
-   process. */
+   process. A NULL file is a check the runtime makes on its own, which has
+   no Goose location to print. */
 static GS_NORETURN void gs_fail(const void *msg, int64_t len, const char *file, int line) {
     static const char lead[] = "goose runtime error: ";
     int64_t pre = sizeof lead - 1;
-    int64_t loc = snprintf(NULL, 0, " (%s:%d)\n", file, line);
+    int64_t loc = file ? snprintf(NULL, 0, " (%s:%d)\n", file, line) : 1;
     uint8_t *text = (uint8_t *)malloc((size_t)(pre + len + loc + 1));
     if (!text) {
         if (gs_contain) gs_panic("out of memory recording an aborted thread");
         fputs(lead, stderr);
         fwrite(msg, 1, (size_t)len, stderr);
-        fprintf(stderr, " (%s:%d)\n", file, line);
+        if (file) fprintf(stderr, " (%s:%d)\n", file, line);
+        else fputc('\n', stderr);
         gs_end(1);
     }
     memcpy(text, lead, (size_t)pre);
     if (len) memcpy(text + pre, msg, (size_t)len);
-    snprintf((char *)text + pre + len, (size_t)loc + 1, " (%s:%d)\n", file, line);
+    if (file) snprintf((char *)text + pre + len, (size_t)loc + 1, " (%s:%d)\n", file, line);
+    else memcpy(text + pre + len, "\n", 2);
     if (gs_contain) {
         memmove(text, text + pre, (size_t)(len + loc - 1));
         gs_contain->msg = text;
@@ -1431,15 +1436,15 @@ static size_t gs_region_usable, gs_region_gap, gs_region_reserve, gs_region_page
 /* The worker running on this thread, main's being -1 (runtime_threads.h). */
 static GS_TLS int64_t gs_current_thread_id = -1;
 /* The program's address space budget for regions and the most regions its
-   main program and any one worker can hold, as gs_rt_start was told, and
+)GSRT"
+R"GSRT(   main program and any one worker can hold, as gs_rt_start was told, and
    the workers that leaves room for: what hardware_threads() reports at
    most. */
 static uint64_t gs_stack_budget;
 static int64_t gs_mainregions, gs_workerregions;
 static int64_t gs_thread_cap = INT64_MAX;
 
-)GSRT"
-R"GSRT(/* A region's own sizes travel with it: those reserved before a refusal
+/* A region's own sizes travel with it: those reserved before a refusal
    halved the size are larger than those after. */
 typedef struct {
     uint8_t *base;
@@ -1646,15 +1651,15 @@ static void gs_native_stack_free(void) {}
 
 /* Address space for one region, or NULL where the platform has none left
    to give: nothing is committed until the fault handler is asked. */
-static uint8_t *gs_os_reserve(size_t usable, size_t size) {
+)GSRT"
+R"GSRT(static uint8_t *gs_os_reserve(size_t usable, size_t size) {
     (void)usable;
     return (uint8_t *)VirtualAlloc(0, size, MEM_RESERVE, PAGE_READWRITE);
 }
 
 static void gs_release_region(const gs_region *r) {
     if (!VirtualFree(r->base, 0, MEM_RELEASE))
-)GSRT"
-R"GSRT(        gs_panic("cannot release data stack address space");
+        gs_panic("cannot release data stack address space");
 }
 
 /* Whether this is the first call of gs_end; and where the later ones wait. */
@@ -1875,7 +1880,8 @@ GS_API uint8_t *gs_reserve_region(gs_stack *stack) {
         p = gs_os_reserve(usable, usable + gs_region_gap);
         if (p) break;
         if (usable <= GS_REGION_MIN) gs_panic("cannot reserve data stack address space");
-        usable /= 2;
+)GSRT"
+R"GSRT(        usable /= 2;
         usable -= usable % gs_region_page;
         gs_region_usable = usable;
     }
@@ -1883,8 +1889,7 @@ GS_API uint8_t *gs_reserve_region(gs_stack *stack) {
     gs_regions[i].base = p;
     gs_regions[i].usable = usable;
     gs_regions[i].size = usable + gs_region_gap;
-)GSRT"
-R"GSRT(    gs_regions[i].stack = stack;
+    gs_regions[i].stack = stack;
     gs_regions[i].committed = p;
     gs_nregions = i + 1;  /* Publish only the initialized entry. */
     return p;
@@ -2069,12 +2074,12 @@ static int64_t gs_sp_key(gs_sppath *p, int64_t i, int leaf) {
    to date with the node below each, after one count in the node at level l
    went from `was` to `now` (0 for an entry added or removed), stopping at
    the first entry that is unchanged. A node's largest count is rescanned
-   only where the count that held it shrank, and only until another as
+)GSRT"
+R"GSRT(   only where the count that held it shrank, and only until another as
    large turns up; a `was` of INT64_MAX rescans the node at level l whole,
    whatever changed in it. */
 static void gs_sp_fix(gs_sppath *p, int64_t l, int64_t was, int64_t now) {
-)GSRT"
-R"GSRT(    for (; l > 0; l--) {
+    for (; l > 0; l--) {
         gs_spinner *in = GS_SPINNER(p, p->node[l - 1]);
         int64_t k = p->pos[l - 1], c = p->node[l], m = in->max[k];
         int leaf = l == p->h;
@@ -2302,7 +2307,8 @@ GS_API int64_t gs_spans_alloc(uint8_t *base, int64_t *n, uint8_t **top, int64_t 
         lf->idx[k] = idx + cnt;
         lf->cnt[k] = now = c - cnt;
         j = k + 1;
-    } else if (lf->n > 1 || p.h == 0) {
+)GSRT"
+R"GSRT(    } else if (lf->n > 1 || p.h == 0) {
         gs_sp_close(lf, k);
         now = 0;
         j = k;
@@ -2311,8 +2317,7 @@ GS_API int64_t gs_spans_alloc(uint8_t *base, int64_t *n, uint8_t **top, int64_t 
         return idx;
     }
     /* As gs_sp_fix, with what the descent noted: the count on the path at
-)GSRT"
-R"GSRT(       level l went from c to `now`, and the node's other entries are the
+       level l went from c to `now`, and the node's other entries are the
        ones before, smaller than cnt, and those from j on, which need
        scanning only where c was the node's largest. */
     for (l = p.h; l > 0; l--) {
@@ -2509,7 +2514,8 @@ static int64_t gs_scan_pair_bytes(const uint8_t *p, int64_t np, const gs_byteset
 #if !defined(__TINYC__) && (defined(__x86_64__) || defined(_M_X64))
 #define GS_SCAN_SSE2 1
 #include <emmintrin.h>
-#include <tmmintrin.h>
+)GSRT"
+R"GSRT(#include <tmmintrin.h>
 #ifdef _WIN32
 #include <intrin.h>
 #else
@@ -2518,8 +2524,7 @@ static int64_t gs_scan_pair_bytes(const uint8_t *p, int64_t np, const gs_byteset
 #if defined(__GNUC__) || defined(__clang__)
 /* clang and gcc compile pshufb only into a function that asks for it. */
 #define GS_SSSE3 __attribute__((target("ssse3")))
-)GSRT"
-R"GSRT(#define gs_ctz32(x) __builtin_ctz(x)
+#define gs_ctz32(x) __builtin_ctz(x)
 #else
 #define GS_SSSE3
 static int gs_ctz32(unsigned x) {
@@ -2697,12 +2702,12 @@ GS_API int64_t gs_scan_pair(const uint8_t *p, int64_t n, const void *a, int64_t 
                             const void *b) {
     const gs_byteset *sa = (const gs_byteset *)a, *sb = (const gs_byteset *)b;
     if (d < 0 || d >= n) return -1;
-    int64_t np = n - d;     /* the positions both bytes fit at */
+)GSRT"
+R"GSRT(    int64_t np = n - d;     /* the positions both bytes fit at */
     /* A set of every byte leaves a search for the other. */
     if (sa->kind == 0) return sa->invert ? gs_scan_any(p + d, np, sb) : -1;
     if (sb->kind == 0) return sb->invert ? gs_scan_any(p, np, sa) : -1;
-)GSRT"
-R"GSRT(#ifdef GS_SCAN_SSE2
+#ifdef GS_SCAN_SSE2
     if (np >= 16 && sa->kind != 5 && sb->kind != 5) return gs_scan_pair_blocks(p, np, sa, d, sb);
     if (np >= 16 && gs_cpu_ssse3) return gs_scan_pair_tables(p, np, sa, d, sb);
 #endif
@@ -2896,12 +2901,12 @@ static int gs_float_digits(uint64_t f, int e, int bits, int emin, char *dig, int
     gs_big_set(&s, 1, up - e + 1 + asym);
     gs_big_set(&mp, 1, up + asym);
     gs_big_set(&mlo, 1, up);
-    /* Scale to 10^*k, the least power of ten above the interval: with
+)GSRT"
+R"GSRT(    /* Scale to 10^*k, the least power of ten above the interval: with
        lg = floor(log2 value), ceil(lg log10 2) is it or one short, and
        78913 / 2^18 is log10 2 closely enough to compute that for |lg| < 1650. */
     for (uint64_t g = f; g; g >>= 1) lg++;
-)GSRT"
-R"GSRT(    *k = lg > 0 ? ((lg * 78913) >> 18) + 1 : -((-lg * 78913) >> 18);
+    *k = lg > 0 ? ((lg * 78913) >> 18) + 1 : -((-lg * 78913) >> 18);
     if (*k >= 0) gs_big_mul_pow10(&s, *k);
     else {
         gs_big_mul_pow10(&r, -*k);
@@ -3493,9 +3498,10 @@ R"GSRT(/* Goose runtime: extern-fn support, spliced in after the generated type
    stack). The runtime object has no generated types, and lays out the ones
    it uses here as codegen does (CodeGen::EmitCoreTypes, CT). An --include
    header follows this and may use what it defines. The generated program
-   calls the OS primitives behind stdlib/os.goose (spec §7.10, defined in
-   runtime_os.h) and std's byte search directly from `extern "gs_..." fn`
-   declarations; no prototype is emitted for a function declared here. */
+   calls the OS primitives behind stdlib/os.goose (spec §7.10), slice_pool's
+   span tree (both defined in runtime_os.h) and std's byte search directly
+   from `extern "gs_..." fn` declarations; no prototype is emitted for a
+   function declared here. */
 
 #ifdef GS_RUNTIME_OBJECT
 #pragma pack(push, 1)
@@ -3663,11 +3669,11 @@ static int64_t gs_clz(uint64_t x) {
     int64_t n = 0;
     if (!x) return 64;
     while (!(x >> 63)) {
-        x <<= 1;
+)GSRT"
+R"GSRT(        x <<= 1;
         n++;
     }
-)GSRT"
-R"GSRT(    return n;
+    return n;
 #endif
 }
 static int64_t gs_ctz(uint64_t x) {
@@ -3718,11 +3724,20 @@ GS_API uint64_t gs_os_random_u64(void);
    cached tops first; C called from Goose must not call it. 0 means an OS
    request failed; a top outside its region panics. */
 GS_API uint8_t gs_trim_memory(void);
+/* std's slice_pool (stdlib/slice_pool_internal.goose) keeps its freelist in
+   a checked copy of the runtime's span tree (runtime_os.h): `nodes` is a
+   node[>..] of GS_SPAN_NODE-byte nodes, and `tree` its header, a field
+   beside it. */
+GS_API int64_t gs_slice_pool_place(gs_rref nodes, void *tree, int64_t len, int64_t cnt);
+GS_API void gs_slice_pool_free(gs_rref nodes, void *tree, int64_t idx, int64_t cnt);
+GS_API int64_t gs_slice_pool_regrow(gs_rref nodes, void *tree, int64_t len, int64_t idx,
+                                    int64_t ol, int64_t cnt);
 )GSRT"
     ) },
     { "runtime_os.h", string_view(
-R"GSRT(/* Goose runtime: the OS primitives behind stdlib/os.goose (spec §7.10), as
-   runtime_ext.h declares them, which this follows. */
+R"GSRT(/* Goose runtime: the OS primitives behind stdlib/os.goose (spec §7.10),
+   and std's slice_pool's span tree, as runtime_ext.h declares them, which
+   this follows. */
 
 #include <time.h>
 #ifndef _WIN32
@@ -3948,9 +3963,9 @@ GS_API uint8_t gs_os_write_file_atomic(sl_u8 path, sl_u8 data) {
             if (GetLastError() == ERROR_FILE_EXISTS) continue;
             return 0;
         }
-        while (ok && left > 0) {
 )GSRT"
-R"GSRT(            DWORD chunk = left > (1 << 30) ? (DWORD)1 << 30 : (DWORD)left, wrote = 0;
+R"GSRT(        while (ok && left > 0) {
+            DWORD chunk = left > (1 << 30) ? (DWORD)1 << 30 : (DWORD)left, wrote = 0;
             ok = WriteFile(h, d, chunk, &wrote, NULL) && wrote == chunk;
             d += chunk;
             left -= chunk;
@@ -4475,15 +4490,477 @@ GS_API uint64_t gs_os_random_u64(void) {
     seed = gs_os_mix64(seed ^ (uint64_t)(uintptr_t)&counter);
     return gs_os_mix64(seed ^ count);
 }
+
+/* ---------------------------------------------------------------------------
+   std's slice_pool (stdlib/slice_pool_internal.goose) keeps the span tree
+   of runtime_impl.h's gs_spans_* in nodes of its own and a `tree` field for
+   the header, both of which the program can write. These are those
+   functions, taking the nodes as its externs pass them and the header
+   apart from them, as `hd`, and with everything read from the tree checked
+   before it is used: a node number must be one of the nodes past node 0
+   (GS_SPBADNUM), an entry count must fit the node it is read from as a leaf
+   or inner node, a height must fit a path, and an entry moved into or out
+   of a node must be one it has room for or holds. A node reached at two
+   levels of a path, or one the chain hands out while it is in the tree,
+   keeps every access inside the nodes: each count these write fits a leaf,
+   and the counts that index an inner node's children are checked where
+   they are read. Sums of stored indices and counts wrap. A check that fails
+   aborts (GS_E_SPANTREE); a wrong tree that passes them hands out wrong
+   spans, which slice_pool checks against its length. New nodes start
+   zeroed, as a pushed `node { .. }` would. reusable[]'s freelist is out of
+   the program's reach, so it keeps the unchecked functions, and this copy
+   goes when reusable[] does. It is here, not beside them, because the
+   externs take a gs_rref, which runtime_ext.h defines. */
+
+typedef struct {
+    gs_sphead *hd;
+    uint8_t *base;
+    int64_t *n;
+    uint8_t **top;
+    int64_t h, node[GS_SPAN_DEPTH], pos[GS_SPAN_DEPTH];
+} gs_spcpath;
+
+#define GS_SPCHEAD(p) ((p)->hd)
+#define GS_SPSUM(a, b) ((int64_t)((uint64_t)(a) + (uint64_t)(b)))
+
+/* Macros rather than functions, which TinyCC would call at every level. */
+#define GS_SPBADNUM(p, i) ((uint64_t)(i) - 1 >= (uint64_t)*(p)->n - 1)
+#define GS_SPBADIN(p, i) (GS_SPBADNUM(p, i) || (uint64_t)GS_SPINNER(p, i)->n - 1 >= GS_SPAN_FAN)
+#define GS_SPBADLEAF(p, i) (GS_SPBADNUM(p, i) || (uint64_t)GS_SPLEAF(p, i)->n > GS_SPAN_LEAF)
+#define GS_SPBADH(h) ((uint64_t)(h) >= GS_SPAN_DEPTH)
+
+static GS_NORETURN void gs_spc_corrupt(void) { gs_abort(GS_E_SPANTREE, NULL, 0); }
+
+#define GS_SPSTART(p, tree, nodes) \
+    ((p)->hd = (gs_sphead *)(tree), (p)->base = (nodes).hdr->base, (p)->n = &(nodes).hdr->len, \
+     (p)->top = &(nodes).stk->top)
+
+static int64_t gs_spc_newnode(gs_spcpath *p) {
+    int64_t i = GS_SPCHEAD(p)->chain;
+    if (i) {
+        if (GS_SPBADNUM(p, i)) gs_spc_corrupt();
+        GS_SPCHEAD(p)->chain = GS_SPLEAF(p, i)->link;
+        return i;
+    }
+    i = (*p->n)++;
+    memset(GS_SPLEAF(p, i), 0, GS_SPAN_NODE);
+    *p->top += GS_SPAN_NODE;
+    return i;
+}
+
+static void gs_spc_dropnode(gs_spcpath *p, int64_t i) {
+    GS_SPLEAF(p, i)->link = GS_SPCHEAD(p)->chain;
+    GS_SPCHEAD(p)->chain = i;
+}
+
+static void gs_spc_open(gs_spleaf *lf, int64_t s) {
+    int64_t j;
+    if ((uint64_t)lf->n >= GS_SPAN_LEAF || (uint64_t)s > (uint64_t)lf->n) gs_spc_corrupt();
+    for (j = lf->n; j > s; j--) {
+        lf->idx[j] = lf->idx[j - 1];
+        lf->cnt[j] = lf->cnt[j - 1];
+    }
+    lf->n++;
+}
+
+static void gs_spc_close(gs_spleaf *lf, int64_t s) {
+    int64_t j;
+    if ((uint64_t)s >= (uint64_t)lf->n) gs_spc_corrupt();
+    lf->n--;
+    for (j = s; j < lf->n; j++) {
+        lf->idx[j] = lf->idx[j + 1];
+        lf->cnt[j] = lf->cnt[j + 1];
+    }
+}
+
+static void gs_spc_openin(gs_spinner *in, int64_t s) {
+    int64_t j;
+    if ((uint64_t)in->n >= GS_SPAN_FAN || (uint64_t)s > (uint64_t)in->n) gs_spc_corrupt();
+    for (j = in->n; j > s; j--) {
+        in->key[j] = in->key[j - 1];
+        in->max[j] = in->max[j - 1];
+        in->child[j] = in->child[j - 1];
+    }
+    in->n++;
+}
+
+static void gs_spc_closein(gs_spinner *in, int64_t s) {
+    int64_t j;
+    if (in->n > GS_SPAN_FAN || (uint64_t)s >= (uint64_t)in->n) gs_spc_corrupt();
+    in->n--;
+    for (j = s; j < in->n; j++) {
+        in->key[j] = in->key[j + 1];
+        in->max[j] = in->max[j + 1];
+        in->child[j] = in->child[j + 1];
+    }
+}
+
+static int64_t gs_spc_max(gs_spcpath *p, int64_t i, int leaf, int64_t stop) {
+    return leaf ? gs_sp_most(GS_SPLEAF(p, i)->cnt, GS_SPLEAF(p, i)->n, stop)
+                : gs_sp_most(GS_SPINNER(p, i)->max, GS_SPINNER(p, i)->n, stop);
+}
+
+static int64_t gs_spc_key(gs_spcpath *p, int64_t i, int leaf) {
+    return leaf ? GS_SPLEAF(p, i)->idx[0] : GS_SPINNER(p, i)->key[0];
+}
+
+static void gs_spc_fix(gs_spcpath *p, int64_t l, int64_t was, int64_t now) {
+    for (; l > 0; l--) {
+        gs_spinner *in = GS_SPINNER(p, p->node[l - 1]);
+        int64_t k = p->pos[l - 1], c = p->node[l], m = in->max[k];
+        int leaf = l == p->h;
+        int64_t key = gs_spc_key(p, c, leaf);
+        int64_t nm = now >= m ? now : was < m ? m : gs_spc_max(p, c, leaf, was);
+        if (in->key[k] == key && nm == m) return;
+        in->key[k] = key;
+        in->max[k] = nm;
+        was = m;
+        now = nm;
+    }
+}
+
+static int64_t gs_spc_find(gs_spcpath *p, int64_t idx) {
+    int64_t l, i = GS_SPCHEAD(p)->root, k;
+    gs_spleaf *lf;
+    p->h = GS_SPCHEAD(p)->height;
+    if (GS_SPBADH(p->h)) gs_spc_corrupt();
+    for (l = 0; l < p->h; l++) {
+        gs_spinner *in;
+        if (GS_SPBADIN(p, i)) gs_spc_corrupt();
+        in = GS_SPINNER(p, i);
+        for (k = 1; k < in->n && in->key[k] <= idx; k++) {}
+        p->node[l] = i;
+        p->pos[l] = k - 1;
+        i = in->child[k - 1];
+    }
+    p->node[p->h] = i;
+    if (GS_SPBADLEAF(p, i)) gs_spc_corrupt();
+    lf = GS_SPLEAF(p, i);
+    for (k = 0; k < lf->n && lf->idx[k] <= idx; k++) {}
+    p->pos[p->h] = k - 1;
+    return k - 1;
+}
+
+static void gs_spc_newroot(gs_spcpath *p, int64_t a, int64_t b, int leaf) {
+    int64_t r = gs_spc_newnode(p);
+    gs_spinner *rn = GS_SPINNER(p, r);
+    rn->n = 2;
+    rn->key[0] = gs_spc_key(p, a, leaf);
+    rn->max[0] = gs_spc_max(p, a, leaf, INT64_MAX);
+    rn->child[0] = a;
+    rn->key[1] = gs_spc_key(p, b, leaf);
+    rn->max[1] = gs_spc_max(p, b, leaf, INT64_MAX);
+    rn->child[1] = b;
+    GS_SPCHEAD(p)->root = r;
+    GS_SPCHEAD(p)->height++;
+}
+
+)GSRT"
+R"GSRT(static void gs_spc_addchild(gs_spcpath *p, int64_t l, int64_t k, int64_t child, int leaf) {
+    for (;;) {
+        gs_spinner *in = GS_SPINNER(p, p->node[l]), *o = in;
+        int64_t key = gs_spc_key(p, child, leaf), max = gs_spc_max(p, child, leaf, INT64_MAX);
+        int64_t s = k, nn = 0;
+        if (in->n == GS_SPAN_FAN) {
+            int64_t half = GS_SPAN_FAN / 2;
+            gs_spinner *r;
+            nn = gs_spc_newnode(p);
+            if (nn == p->node[l]) gs_spc_corrupt();
+            r = GS_SPINNER(p, nn);
+            r->n = in->n - half;
+            memcpy(r->key, in->key + half, (size_t)r->n * 8);
+            memcpy(r->max, in->max + half, (size_t)r->n * 8);
+            memcpy(r->child, in->child + half, (size_t)r->n * 8);
+            in->n = half;
+            if (k > half) {
+                o = r;
+                s = k - half;
+            }
+        }
+        gs_spc_openin(o, s);
+        o->key[s] = key;
+        o->max[s] = max;
+        o->child[s] = child;
+        if (!nn) {
+            gs_spc_fix(p, l, 0, max);
+            return;
+        }
+        if (l == 0) {
+            gs_spc_newroot(p, p->node[0], nn, 0);
+            return;
+        }
+        gs_spc_fix(p, l, INT64_MAX, 0);
+        child = nn;
+        leaf = 0;
+        k = p->pos[l - 1] + 1;
+        l--;
+    }
+}
+
+static void gs_spc_insert(gs_spcpath *p, int64_t k, int64_t idx, int64_t cnt) {
+    gs_spleaf *lf = GS_SPLEAF(p, p->node[p->h]), *o = lf;
+    int64_t s = k, nn = 0;
+    if (lf->n == GS_SPAN_LEAF) {
+        int64_t half = GS_SPAN_LEAF / 2;
+        gs_spleaf *r;
+        nn = gs_spc_newnode(p);
+        if (nn == p->node[p->h]) gs_spc_corrupt();
+        r = GS_SPLEAF(p, nn);
+        r->n = lf->n - half;
+        memcpy(r->idx, lf->idx + half, (size_t)r->n * 8);
+        memcpy(r->cnt, lf->cnt + half, (size_t)r->n * 8);
+        lf->n = half;
+        if (k > half) {
+            o = r;
+            s = k - half;
+        }
+    }
+    gs_spc_open(o, s);
+    o->idx[s] = idx;
+    o->cnt[s] = cnt;
+    if (!nn) {
+        gs_spc_fix(p, p->h, 0, cnt);
+    } else if (p->h == 0) {
+        gs_spc_newroot(p, p->node[0], nn, 1);
+    } else {
+        gs_spc_fix(p, p->h, INT64_MAX, 0);
+        gs_spc_addchild(p, p->h - 1, p->pos[p->h - 1] + 1, nn, 1);
+    }
+}
+
+static void gs_spc_delete(gs_spcpath *p, int64_t k) {
+    gs_spleaf *lf = GS_SPLEAF(p, p->node[p->h]);
+    int64_t c = lf->cnt[k], l;
+    gs_spc_close(lf, k);
+    if (lf->n > 0 || p->h == 0) {
+        gs_spc_fix(p, p->h, c, 0);
+        return;
+    }
+    gs_spc_dropnode(p, p->node[p->h]);
+    for (l = p->h - 1;; l--) {
+        gs_spinner *in = GS_SPINNER(p, p->node[l]);
+        int64_t e = p->pos[l], m = in->max[e];
+        gs_spc_closein(in, e);
+        if (in->n > 0) {
+            gs_spc_fix(p, l, m, 0);
+            break;
+        }
+        /* A root of one child, which the functions never leave. */
+        if (l == 0) gs_spc_corrupt();
+        gs_spc_dropnode(p, p->node[l]);
+    }
+    while (GS_SPCHEAD(p)->height > 0) {
+        int64_t r = GS_SPCHEAD(p)->root;
+        if (GS_SPBADNUM(p, r)) gs_spc_corrupt();
+        if (GS_SPINNER(p, r)->n != 1) break;
+        GS_SPCHEAD(p)->root = GS_SPINNER(p, r)->child[0];
+        GS_SPCHEAD(p)->height--;
+        gs_spc_dropnode(p, r);
+    }
+}
+
+static void gs_spc_take(gs_spcpath *p, int64_t k, int64_t cnt) {
+    gs_spleaf *lf = GS_SPLEAF(p, p->node[p->h]);
+    int64_t c = lf->cnt[k];
+    if (c <= cnt) {
+        gs_spc_delete(p, k);
+        return;
+    }
+    lf->idx[k] = GS_SPSUM(lf->idx[k], cnt);
+    lf->cnt[k] = c - cnt;
+    gs_spc_fix(p, p->h, c, c - cnt);
+}
+
+GS_API int64_t gs_slice_pool_place(gs_rref nodes, void *tree, int64_t len, int64_t cnt) {
+    gs_spcpath p;
+    int64_t l, i, k = 0, j, m, c, now, idx, before[GS_SPAN_DEPTH];
+    gs_spleaf *lf = NULL;
+    if (cnt == 0 || nodes.hdr->len == 0) return len;
+    GS_SPSTART(&p, tree, nodes);
+    p.h = GS_SPCHEAD(&p)->height;
+    if (GS_SPBADH(p.h)) gs_spc_corrupt();
+    i = GS_SPCHEAD(&p)->root;
+    for (l = 0; l < p.h; l++) {
+        gs_spinner *in;
+        if (GS_SPBADIN(&p, i)) gs_spc_corrupt();
+        in = GS_SPINNER(&p, i);
+        for (k = 0, m = 0; k < in->n && in->max[k] < cnt; k++)
+            if (in->max[k] > m) m = in->max[k];
+        if (k == in->n) break;
+        p.node[l] = i;
+        p.pos[l] = k;
+        before[l] = m;
+        i = in->child[k];
+    }
+    if (l == p.h) {
+        if (GS_SPBADLEAF(&p, i)) gs_spc_corrupt();
+        lf = GS_SPLEAF(&p, i);
+        for (k = 0, m = 0; k < lf->n && lf->cnt[k] < cnt; k++)
+            if (lf->cnt[k] > m) m = lf->cnt[k];
+        before[l] = m;
+    }
+    if (l < p.h || k == lf->n) {
+        for (l = 0, i = GS_SPCHEAD(&p)->root; l < p.h; l++) {
+            gs_spinner *in;
+            if (GS_SPBADIN(&p, i)) gs_spc_corrupt();
+            in = GS_SPINNER(&p, i);
+            p.node[l] = i;
+            p.pos[l] = in->n - 1;
+            i = in->child[in->n - 1];
+        }
+        p.node[p.h] = i;
+        if (GS_SPBADLEAF(&p, i)) gs_spc_corrupt();
+        lf = GS_SPLEAF(&p, i);
+        k = lf->n - 1;
+        if (k < 0 || GS_SPSUM(lf->idx[k], lf->cnt[k]) != len) return len;
+        idx = lf->idx[k];
+        gs_spc_take(&p, k, cnt);
+        return idx;
+    }
+    p.node[p.h] = i;
+    p.pos[p.h] = k;
+    idx = lf->idx[k];
+    c = lf->cnt[k];
+    if (c > cnt) {
+        lf->idx[k] = GS_SPSUM(idx, cnt);
+        lf->cnt[k] = now = c - cnt;
+        j = k + 1;
+    } else if (lf->n > 1 || p.h == 0) {
+        gs_spc_close(lf, k);
+        now = 0;
+        j = k;
+    } else {
+        gs_spc_delete(&p, k);
+        return idx;
+    }
+    for (l = p.h; l > 0; l--) {
+        gs_spinner *in = GS_SPINNER(&p, p.node[l - 1]);
+        int64_t e = p.pos[l - 1], mx = in->max[e], nm = mx;
+        int64_t key = gs_spc_key(&p, p.node[l], l == p.h);
+        if (c == mx) {
+            const int64_t *v = l == p.h ? lf->cnt : GS_SPINNER(&p, p.node[l])->max;
+            int64_t w = l == p.h ? lf->n : GS_SPINNER(&p, p.node[l])->n;
+            nm = before[l] > now ? before[l] : now;
+            for (; j < w && nm < c; j++)
+                if (v[j] > nm) nm = v[j];
+        }
+        if (in->key[e] == key && nm == mx) break;
+        in->key[e] = key;
+        in->max[e] = nm;
+        c = mx;
+        now = nm;
+        j = e + 1;
+    }
+    return idx;
+}
+
+typedef struct {
+    gs_spleaf *lf, *nl;
+    int64_t k, nk;
+    gs_spcpath *np;
+} gs_spcnear;
+
+static void gs_spc_near(gs_spcpath *p, gs_spcpath *q, int64_t idx, int64_t end, gs_spcnear *s) {
+    int64_t l;
+    s->k = gs_spc_find(p, idx);
+    s->lf = GS_SPLEAF(p, p->node[p->h]);
+    s->nl = NULL;
+    s->nk = -1;
+    s->np = p;
+    if (s->k + 1 < s->lf->n) {
+        s->nl = s->lf;
+        s->nk = s->k + 1;
+        return;
+    }
+    for (l = p->h - 1; l >= 0 && p->pos[l] + 1 >= GS_SPINNER(p, p->node[l])->n; l--) {}
+    if (l < 0 || GS_SPINNER(p, p->node[l])->key[p->pos[l] + 1] != end) return;
+    q->hd = p->hd;
+    q->base = p->base;
+    q->n = p->n;
+    q->top = p->top;
+    q->h = p->h;
+    memcpy(q->node, p->node, (size_t)(l + 1) * 8);
+    memcpy(q->pos, p->pos, (size_t)(l + 1) * 8);
+    for (q->pos[l]++; l < q->h; l++) {
+        int64_t c = GS_SPINNER(q, q->node[l])->child[q->pos[l]];
+        if (l + 1 < q->h ? GS_SPBADIN(q, c) : GS_SPBADLEAF(q, c)) gs_spc_corrupt();
+        q->node[l + 1] = c;
+        q->pos[l + 1] = 0;
+    }
+    s->np = q;
+    s->nl = GS_SPLEAF(q, q->node[q->h]);
+    s->nk = 0;
+}
+
+static void gs_spc_release(gs_spcpath *p, gs_spcnear *s, int64_t idx, int64_t cnt) {
+    gs_spleaf *lf = s->lf, *nl = s->nl;
+    int64_t k = s->k, nk = s->nk;
+    int prev = k >= 0 && GS_SPSUM(lf->idx[k], lf->cnt[k]) == idx;
+    int next = nl && idx + cnt == nl->idx[nk];
+    if (prev) {
+        int64_t c = lf->cnt[k], m = GS_SPSUM(GS_SPSUM(c, cnt), next ? nl->cnt[nk] : 0);
+        lf->cnt[k] = m;
+        if (next && nl == lf) gs_spc_close(lf, nk);
+        gs_spc_fix(p, p->h, c, m);
+        if (next && nl != lf) gs_spc_delete(s->np, nk);
+    } else if (next) {
+        int64_t c = nl->cnt[nk];
+)GSRT"
+R"GSRT(        nl->idx[nk] = idx;
+        nl->cnt[nk] = GS_SPSUM(c, cnt);
+        gs_spc_fix(s->np, s->np->h, c, nl->cnt[nk]);
+    } else {
+        gs_spc_insert(p, k + 1, idx, cnt);
+    }
+}
+
+GS_API void gs_slice_pool_free(gs_rref nodes, void *tree, int64_t idx, int64_t cnt) {
+    gs_spcpath p, q;
+    gs_spcnear s;
+    if (cnt <= 0) return;
+    GS_SPSTART(&p, tree, nodes);
+    if (*p.n == 0) {
+        /* Node 0 stays zero, the chain's end. */
+        memset(p.base, 0, GS_SPAN_NODE);
+        *p.n = 1;
+        *p.top = p.base + GS_SPAN_NODE;
+        p.hd->chain = 0;
+        p.hd->height = 0;
+        p.hd->root = gs_spc_newnode(&p);
+    }
+    gs_spc_near(&p, &q, idx, idx + cnt, &s);
+    gs_spc_release(&p, &s, idx, cnt);
+}
+
+GS_API int64_t gs_slice_pool_regrow(gs_rref nodes, void *tree, int64_t len, int64_t idx,
+                                    int64_t ol, int64_t cnt) {
+    gs_spcpath p, q;
+    gs_spcnear s;
+    int64_t end = idx + ol;
+    if (nodes.hdr->len == 0) {
+        gs_slice_pool_free(nodes, tree, idx, ol);
+        return gs_slice_pool_place(nodes, tree, len, cnt);
+    }
+    GS_SPSTART(&p, tree, nodes);
+    gs_spc_near(&p, &q, idx, end, &s);
+    if (s.nl && s.nl->idx[s.nk] == end &&
+        (s.nl->cnt[s.nk] >= cnt - ol || GS_SPSUM(end, s.nl->cnt[s.nk]) == len)) {
+        gs_spc_take(s.np, s.nk, cnt - ol);
+        return idx;
+    }
+    gs_spc_release(&p, &s, idx, ol);
+    return gs_slice_pool_place(nodes, tree, len, cnt);
+}
 )GSRT"
     ) },
     { "goose.h", string_view(
 R"GSRT(/* goose.h -- for C compiled on its own, a package's or a program's sidecar
    C (docs/packages.md): the Goose values an extern fn hands it that C
-   cannot spell from the layouts alone (spec §7.10, C.2). A `u8[>..]&`
+   cannot spell from the layouts alone (spec §7.10, C.2). A `T[>..]&`
    parameter arrives as a gs_rref, the resizable's header and its data
-   stack, and C appends to it with gs_bld_append; the stack's top is where
-   the bytes go, and nothing else of it is C's to touch.
+   stack. C may write its elements and append whole ones at the stack's
+   top, moving the top and the header's count together, as gs_bld_append
+   does for the bytes of a `u8[>..]&`; nothing else of it is C's to touch.
 
    The compiler writes this header beside every native part it builds and
    puts it on that part's include path, `#include "goose.h"`, and builds

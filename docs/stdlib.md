@@ -738,7 +738,8 @@ Allocation selects the first free span in index order that fits. If none fits,
 it grows the backing array, using any free span at the tail first. Free spans
 coalesce with their neighbors. An augmented B+ tree of 512-byte nodes handles
 first-fit search and neighbor lookup with tree walks and bounded node scans;
-emptied nodes are reused. The policy matches `reusable[]`.
+emptied nodes are reused. The tree code is the runtime's, `reusable[]`'s, in a
+copy that checks what it reads from `nodes` and `tree`, so the policy matches.
 
 `alloc_slice` defaults every element it hands out, including reused elements.
 `alloc_copy` initializes directly from a source slice, without default-filling
@@ -764,7 +765,11 @@ does not retarget it. Double frees, overlapping live allocations caused by
 invalid frees, and accessing a logically freed run are application errors.
 `items.len` is the high-water length, not the count of live elements. Treat
 `nodes` and `tree` as internal bookkeeping, and do not shrink or replace `items`.
-Ordinary bounds and lifetime checks still apply to these public fields.
+Ordinary bounds and lifetime checks still apply to these public fields. The
+runtime checks every node number and entry count it reads from them: one a
+program wrote wrong aborts with `slice pool span tree is corrupt`, which names
+no source line. A span edited to start past `items` aborts as an invalid free
+span; other edited spans can hand elements out twice, as a double free can.
 `recycle_all` makes the entire high-water range one free run and recycles all
 metadata nodes. It retains initialized values, backing storage and existing
 views; the next allocation starts at index zero.

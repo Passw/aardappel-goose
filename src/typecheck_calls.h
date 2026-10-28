@@ -2567,7 +2567,9 @@ inline bool TypeCheck::ExternParamOk(TypeExpr *t, string &why) {
             return false;
         }
         auto s = t->ref->sub;
-        if (s->kind == TY_ARRAY && s->arr->akind == A_GROW && IsU8(s->arr->sub)) return true;
+        // A resizable crosses as its header and stack (gs_rref), and C sees
+        // its elements as blocks of their packed size.
+        if (s->kind == TY_ARRAY && s->arr->akind == A_GROW) return ExternValueOk(s->arr->sub, why);
         return ExternValueOk(s, why);
     }
     if (t->kind == TY_SLICE) return ExternValueOk(t->sub, why);

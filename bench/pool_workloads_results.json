@@ -450,5 +450,545 @@
         "median_goose_cycles": 1061669972
       }
     }
+  },
+  "runtime_span_tree": {
+    "date": "2026-10-28",
+    "note": "Etc::CacheSimulation alone, with slice_pool on the runtime's span tree (gs_slice_pool_*); the legacy side is reusable[] built by the same compiler.",
+    "builds": {
+      "baseline": "94cc64daeabcae6f072dc1fe2b864acda5a001bc",
+      "candidate": "migrated-baseline",
+      "construct_timer": true,
+      "compile_cpus": "28",
+      "alloc_copy": false,
+      "compiler_sha256": "3cacac6b370577baea4ee92b2adc3531db471f2957188b1f408b8bcbd5328e3c",
+      "library_sha256": "d8b0cd9a05fadf613b3ecb126d641ca527414d62229533ee4c8f641fc3287857",
+      "internal_sha256": "488048c4e67754c878aa24ae25a941833a4a1a36ba679a2444b13806e7d42e15",
+      "arena_cflags": [
+        "-O2",
+        "-w",
+        "-fstrict-aliasing",
+        "-falign-functions=4096"
+      ],
+      "clang": "clang version 22.1.3 (https://github.com/llvm/llvm-project e9846648fd6183ee6d8cbdb4502213fcf902a211)\nTarget: x86_64-pc-windows-msvc\nThread model: posix\nInstalledDir: C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\Llvm\\x64\\bin",
+      "sources": {
+        "legacy": {
+          "bench/kostya/goose/src/arith.goose": "c2446c25027668ad458c9bf3ea1c4f04dcc68b26112ee41068d6b822058c510a",
+          "bench/kostya/goose/src/base64_decode.goose": "c9c9963401e84763b9c327fd6fab6b07cf644e70a7292b57c4eaf731ac7ff983",
+          "bench/kostya/goose/src/base64_encode.goose": "bf2db8323533d61b0f1541340c52432eb89c50a43fbe8f8ca4f8e7fbe2ed53e5",
+          "bench/kostya/goose/src/bench.goose": "41562efd238178bb041c2cac7dd0d4806e2761b9b0563e6c90b8e5beb67abeba",
+          "bench/kostya/goose/src/binarytrees.goose": "54048a48d203f5c08f151e4f645ff1b1b1e45f35dcd8f40447efe7bf81f795db",
+          "bench/kostya/goose/src/brainfuck_array.goose": "59165df247a2261eb036d0e2c82e0e6642fe18a30c794bb1bac332213ea67f08",
+          "bench/kostya/goose/src/brainfuck_recursion.goose": "7088b2ce4c4fd85e0a97c636c747578530375bc888ac342a0443eeb9a3e712e6",
+          "bench/kostya/goose/src/buffer_hash.goose": "f3e54862e0011ed7d15a2f34cfa915836f9ad1aab1642b41f6c79ce52a7e4255",
+          "bench/kostya/goose/src/bwt.goose": "a3ba542aefb2ad72d4c96eca9f1bb1192776539e5e73ad2f25ba30f1bd68a876",
+          "bench/kostya/goose/src/cache_simulation.goose": "95f66c2e3095e51373b839fb50bb37b6e73417f7c01657127372bbed73612a70",
+          "bench/kostya/goose/src/calculator_ast.goose": "5c8c37cf3a291825c84ea35df012840f62eafe58d8e537964fb7d56e7f6da3a6",
+          "bench/kostya/goose/src/calculator_interpreter.goose": "a02fb9729c2b57b7e1f806adc25c27d4a0586447cbbc78a4b8090998261a0be2",
+          "bench/kostya/goose/src/compress_data.goose": "8d6c6f5d5ea5651a7ddd40edb1c1d169421a95bdc2d961f482ba207f4e628dd3",
+          "bench/kostya/goose/src/csv_parse.goose": "e9ba9dd2a68e0d5ae3b9777e1beaf5cb9f3a1ac31dfa414ce14600eb3300369e",
+          "bench/kostya/goose/src/distance.goose": "9f5d84417bc2e8debbe556cba65afd75e7babed38485e9b74c47c8ed5a48ef5e",
+          "bench/kostya/goose/src/fannkuchredux.goose": "ef2b026ffb9644f6ec80b528d3501f5f66a592447a86a79667dc60c5a2db1df4",
+          "bench/kostya/goose/src/game_of_life.goose": "4527d37ef0daffcfb1755bfeea318ffe4e8bd5d467c9b81c46021bf6ce202e60",
+          "bench/kostya/goose/src/graph_path.goose": "af43b7b8755854802a110304518afa6aeaff819440b4a982dca17e268b487c0a",
+          "bench/kostya/goose/src/helper.goose": "f3083a88c529ea111008a9cbb2acb7b99ede6398ef3057690b669a5ec9d8b65e",
+          "bench/kostya/goose/src/huffman.goose": "d7f6c155433f052d637797e96d9bcd48beb61f7854aaa5fd64b726de321dbc2e",
+          "bench/kostya/goose/src/json_generate.goose": "969500fc1d5faf1804928b1fa584898a23feda09b07214468dbe381d0b06f035",
+          "bench/kostya/goose/src/json_parse_dom.goose": "bcede3e0005c90e33b558deb30472c3b29ec10807f6adcb69eb70db0f5780c27",
+          "bench/kostya/goose/src/json_parse_mapping.goose": "6cb7abe1de7db4f4a581b30c68b2631578aeba5e8d47c7b7001aa29e3130652b",
+          "bench/kostya/goose/src/log_parser.goose": "5dfef634ceff06e382e3aec42d4cb8d1468087dc8e946fec3ecb0974f885cb5a",
+          "bench/kostya/goose/src/lzw.goose": "ee5a794dd26c1568f191014867cc430cec403d00be5a70572194a903057d8d95",
+          "bench/kostya/goose/src/main.goose": "70dd3878bccbbb7fa6bcc009797d4ea414690eefc238131c1007ba5553c7384d",
+          "bench/kostya/goose/src/mandelbrot.goose": "af24da4d18d526ba439d6502da538f76ad2345662e7307a4f2bed1dc2ccd2275",
+          "bench/kostya/goose/src/matmul.goose": "e6a9d0a5391c90ef8dade8d3cc5ba095652fbe83d5cf46e4714c9594b7094b99",
+          "bench/kostya/goose/src/maze.goose": "4ef9f67d490ae63049ec989467ed06ab4890551607e48e64cc805b63610a49ce",
+          "bench/kostya/goose/src/nbody.goose": "75ffa7be3d17ee6046e7c834a0a30c7aeb2a1a972b8c859fd83a1437fa396b0f",
+          "bench/kostya/goose/src/neural_net.goose": "9d4dd7d9f671aae23155fd86833de2d70230bc1152d5a53db5dc2d51850a5276",
+          "bench/kostya/goose/src/sieve.goose": "d8d5ac7bf548324c7adfc407a3b5198bdbe26beaf02aaf15a25b29b5bfde8a26",
+          "bench/kostya/goose/src/sort.goose": "f39821f09cfde346e534ae244b8aafd1842900577706740cb4da4b6470452d7c",
+          "bench/kostya/goose/src/spectralnorm.goose": "97f784d58a931815607039f113863110739f2d4afba9524eda893208b2b8a5a7",
+          "bench/kostya/goose/src/template.goose": "f5165d36021425bf5a9aee70c9774e6853f17eaa1616bbfa478ad6de4aa5ee28",
+          "bench/kostya/goose/src/text_raytracer.goose": "979d974bbf4865a61f3bf94f097b0161d009cea8293d488f87954bcaa66062a9",
+          "bench/kostya/goose/src/words.goose": "8c61707669c3cbb2bed5021dab11b89249de55c935d79eace00217c71cf7ee98",
+          "bench/kostya2/common/notify.h": "814f3ff412f918418d21797817ec3d358addcea8a85a1cdefc42e98a77269609",
+          "bench/kostya2/common/win/libnotify.c": "79982227129fbe0369f5c8f92e2c4e459c75c14dc40fb7858b14b0cda72712b1",
+          "bench/kostya2/common/win/unistd.h": "4b0984592b4f7cb5bc35e07bbe38ed3e845821fb685b0b2f73435868d298c5fe",
+          "bench/kostya2/matmul/matmul.goose": "28c98205546e7e4e5e595cd8ab06a217d63f8b0582d9d44e8450acb44f9f14a0",
+          "bench/kostya2/primes/primes.goose": "85f23ca0aaef06bfa34421ed8a8c5136f00d9a396f8efc2688ca080d51d64d19"
+        },
+        "library": {
+          "bench/kostya/goose/src/arith.goose": "c2446c25027668ad458c9bf3ea1c4f04dcc68b26112ee41068d6b822058c510a",
+          "bench/kostya/goose/src/base64_decode.goose": "c9c9963401e84763b9c327fd6fab6b07cf644e70a7292b57c4eaf731ac7ff983",
+          "bench/kostya/goose/src/base64_encode.goose": "bf2db8323533d61b0f1541340c52432eb89c50a43fbe8f8ca4f8e7fbe2ed53e5",
+          "bench/kostya/goose/src/bench.goose": "41562efd238178bb041c2cac7dd0d4806e2761b9b0563e6c90b8e5beb67abeba",
+          "bench/kostya/goose/src/binarytrees.goose": "54048a48d203f5c08f151e4f645ff1b1b1e45f35dcd8f40447efe7bf81f795db",
+          "bench/kostya/goose/src/brainfuck_array.goose": "59165df247a2261eb036d0e2c82e0e6642fe18a30c794bb1bac332213ea67f08",
+          "bench/kostya/goose/src/brainfuck_recursion.goose": "7088b2ce4c4fd85e0a97c636c747578530375bc888ac342a0443eeb9a3e712e6",
+          "bench/kostya/goose/src/buffer_hash.goose": "f3e54862e0011ed7d15a2f34cfa915836f9ad1aab1642b41f6c79ce52a7e4255",
+          "bench/kostya/goose/src/bwt.goose": "a3ba542aefb2ad72d4c96eca9f1bb1192776539e5e73ad2f25ba30f1bd68a876",
+          "bench/kostya/goose/src/cache_simulation.goose": "63b60a48af2691377b4d2a81645a13902ee74f84679d4d744750522e37a57eed",
+          "bench/kostya/goose/src/calculator_ast.goose": "5c8c37cf3a291825c84ea35df012840f62eafe58d8e537964fb7d56e7f6da3a6",
+          "bench/kostya/goose/src/calculator_interpreter.goose": "a02fb9729c2b57b7e1f806adc25c27d4a0586447cbbc78a4b8090998261a0be2",
+          "bench/kostya/goose/src/compress_data.goose": "8d6c6f5d5ea5651a7ddd40edb1c1d169421a95bdc2d961f482ba207f4e628dd3",
+          "bench/kostya/goose/src/csv_parse.goose": "e9ba9dd2a68e0d5ae3b9777e1beaf5cb9f3a1ac31dfa414ce14600eb3300369e",
+          "bench/kostya/goose/src/distance.goose": "9f5d84417bc2e8debbe556cba65afd75e7babed38485e9b74c47c8ed5a48ef5e",
+          "bench/kostya/goose/src/fannkuchredux.goose": "ef2b026ffb9644f6ec80b528d3501f5f66a592447a86a79667dc60c5a2db1df4",
+          "bench/kostya/goose/src/game_of_life.goose": "c16149071525904566d5dec68a0c9644a1cf20432cb3eecf16a761a9d1599f9a",
+          "bench/kostya/goose/src/graph_path.goose": "f081ebf88a6e0b6d22c49d96edddb08962327612805f10c35ac093fff177148c",
+          "bench/kostya/goose/src/helper.goose": "f3083a88c529ea111008a9cbb2acb7b99ede6398ef3057690b669a5ec9d8b65e",
+          "bench/kostya/goose/src/huffman.goose": "d7f6c155433f052d637797e96d9bcd48beb61f7854aaa5fd64b726de321dbc2e",
+          "bench/kostya/goose/src/json_generate.goose": "969500fc1d5faf1804928b1fa584898a23feda09b07214468dbe381d0b06f035",
+          "bench/kostya/goose/src/json_parse_dom.goose": "bcede3e0005c90e33b558deb30472c3b29ec10807f6adcb69eb70db0f5780c27",
+          "bench/kostya/goose/src/json_parse_mapping.goose": "6cb7abe1de7db4f4a581b30c68b2631578aeba5e8d47c7b7001aa29e3130652b",
+          "bench/kostya/goose/src/log_parser.goose": "5dfef634ceff06e382e3aec42d4cb8d1468087dc8e946fec3ecb0974f885cb5a",
+          "bench/kostya/goose/src/lzw.goose": "ee5a794dd26c1568f191014867cc430cec403d00be5a70572194a903057d8d95",
+          "bench/kostya/goose/src/main.goose": "f04ccef13d2d42742c81a7f5b904f1305180ecd6e4e3005c39551261a85a0bcb",
+          "bench/kostya/goose/src/mandelbrot.goose": "af24da4d18d526ba439d6502da538f76ad2345662e7307a4f2bed1dc2ccd2275",
+          "bench/kostya/goose/src/matmul.goose": "8fa9e71f1a9ed14de81f81b5c89664f2b3b45e5d6aacb8854475b79ef71cff39",
+          "bench/kostya/goose/src/maze.goose": "54da9722b2a1834603187d37101debdae5f98cb054b3de9e96168ffa05cac7ad",
+          "bench/kostya/goose/src/nbody.goose": "75ffa7be3d17ee6046e7c834a0a30c7aeb2a1a972b8c859fd83a1437fa396b0f",
+          "bench/kostya/goose/src/neural_net.goose": "9d4dd7d9f671aae23155fd86833de2d70230bc1152d5a53db5dc2d51850a5276",
+          "bench/kostya/goose/src/sieve.goose": "d8d5ac7bf548324c7adfc407a3b5198bdbe26beaf02aaf15a25b29b5bfde8a26",
+          "bench/kostya/goose/src/sort.goose": "f39821f09cfde346e534ae244b8aafd1842900577706740cb4da4b6470452d7c",
+          "bench/kostya/goose/src/spectralnorm.goose": "97f784d58a931815607039f113863110739f2d4afba9524eda893208b2b8a5a7",
+          "bench/kostya/goose/src/template.goose": "f5165d36021425bf5a9aee70c9774e6853f17eaa1616bbfa478ad6de4aa5ee28",
+          "bench/kostya/goose/src/text_raytracer.goose": "979d974bbf4865a61f3bf94f097b0161d009cea8293d488f87954bcaa66062a9",
+          "bench/kostya/goose/src/words.goose": "8c61707669c3cbb2bed5021dab11b89249de55c935d79eace00217c71cf7ee98",
+          "bench/kostya2/common/notify.h": "814f3ff412f918418d21797817ec3d358addcea8a85a1cdefc42e98a77269609",
+          "bench/kostya2/common/win/libnotify.c": "79982227129fbe0369f5c8f92e2c4e459c75c14dc40fb7858b14b0cda72712b1",
+          "bench/kostya2/common/win/unistd.h": "4b0984592b4f7cb5bc35e07bbe38ed3e845821fb685b0b2f73435868d298c5fe",
+          "bench/kostya2/matmul/matmul.goose": "a7af6b3397f42232c577a9bc902ca338ef5fe1f5e18189be03c702ab3074e342",
+          "bench/kostya2/primes/primes.goose": "6b199d46b51da1088016b602280c5a13348f6d42cf1728eab6ef6b228f4c0b76"
+        }
+      },
+      "builds": {
+        "legacy": {
+          "c_bytes": 2555217,
+          "exe_bytes": 1259520,
+          "goose_seconds": [
+            0.24596349988132715,
+            0.24957139999605715,
+            0.25951300002634525,
+            0.2672139999922365,
+            0.2522116999607533
+          ],
+          "goose_cycles": [
+            1029208302,
+            1043764184,
+            1084674668,
+            1116541051,
+            1048798704
+          ],
+          "median_goose_seconds": 0.2522116999607533,
+          "median_goose_cycles": 1048798704
+        },
+        "library": {
+          "c_bytes": 2590229,
+          "exe_bytes": 1275904,
+          "goose_seconds": [
+            0.25888799992389977,
+            0.2549169999547303,
+            0.24977180012501776,
+            0.25811460008844733,
+            0.25734289991669357
+          ],
+          "goose_cycles": [
+            1078710069,
+            1065664976,
+            1044347897,
+            1080079652,
+            1072484965
+          ],
+          "median_goose_seconds": 0.25734289991669357,
+          "median_goose_cycles": 1072484965
+        }
+      }
+    },
+    "cpus": "28",
+    "reps": 3,
+    "copies": 3,
+    "warmups": 1,
+    "configurations": {
+      "test.js": "6813d5614fb012c3cc92bace34a5c4ee2de0bb58d36b6286e976ed7c886dd6e1",
+      "run.js": "aca101e7ff2c295507e72a8b5d8dfe5e91d5b0900c03fe1c14682d0a1e30079d"
+    },
+    "samples": [
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "legacy",
+        "copy": 0,
+        "rep": 0,
+        "warmup": true,
+        "seconds": 0.908,
+        "prepare_seconds": 9.988434612751007e-08,
+        "construct_seconds": null,
+        "wall_seconds": 1.1468283999711275,
+        "cycles": 4715016530,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "library",
+        "copy": 0,
+        "rep": 0,
+        "warmup": true,
+        "seconds": 0.989,
+        "prepare_seconds": 1.0011717677116394e-07,
+        "construct_seconds": null,
+        "wall_seconds": 1.2286201999522746,
+        "cycles": 5135878443,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "library",
+        "copy": 1,
+        "rep": 0,
+        "warmup": true,
+        "seconds": 0.987,
+        "prepare_seconds": 9.988434612751007e-08,
+        "construct_seconds": null,
+        "wall_seconds": 1.2244986998848617,
+        "cycles": 5124800800,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "legacy",
+        "copy": 1,
+        "rep": 0,
+        "warmup": true,
+        "seconds": 0.899,
+        "prepare_seconds": 1.0011717677116394e-07,
+        "construct_seconds": null,
+        "wall_seconds": 1.1237734998576343,
+        "cycles": 4667474440,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "legacy",
+        "copy": 2,
+        "rep": 0,
+        "warmup": true,
+        "seconds": 0.9,
+        "prepare_seconds": 0.0,
+        "construct_seconds": null,
+        "wall_seconds": 1.1206587001215667,
+        "cycles": 4675787213,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "library",
+        "copy": 2,
+        "rep": 0,
+        "warmup": true,
+        "seconds": 0.994,
+        "prepare_seconds": 0.0,
+        "construct_seconds": null,
+        "wall_seconds": 1.2363927999977022,
+        "cycles": 5174836088,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "library",
+        "copy": 0,
+        "rep": 1,
+        "warmup": false,
+        "seconds": 0.992,
+        "prepare_seconds": 0.0,
+        "construct_seconds": null,
+        "wall_seconds": 1.2118274001404643,
+        "cycles": 5161451904,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "legacy",
+        "copy": 0,
+        "rep": 1,
+        "warmup": false,
+        "seconds": 0.899,
+        "prepare_seconds": 1.0011717677116394e-07,
+        "construct_seconds": null,
+        "wall_seconds": 1.0961399998050183,
+        "cycles": 4666310478,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "legacy",
+        "copy": 1,
+        "rep": 1,
+        "warmup": false,
+        "seconds": 0.896,
+        "prepare_seconds": 0.0,
+        "construct_seconds": null,
+        "wall_seconds": 1.0929956999607384,
+        "cycles": 4653906601,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "library",
+        "copy": 1,
+        "rep": 1,
+        "warmup": false,
+        "seconds": 0.988,
+        "prepare_seconds": 9.988434612751007e-08,
+        "construct_seconds": null,
+        "wall_seconds": 1.2085290998220444,
+        "cycles": 5148453136,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "library",
+        "copy": 2,
+        "rep": 1,
+        "warmup": false,
+        "seconds": 0.988,
+        "prepare_seconds": 1.0011717677116394e-07,
+        "construct_seconds": null,
+        "wall_seconds": 1.2039983998984098,
+        "cycles": 5130434914,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "legacy",
+        "copy": 2,
+        "rep": 1,
+        "warmup": false,
+        "seconds": 0.897,
+        "prepare_seconds": 1.0011717677116394e-07,
+        "construct_seconds": null,
+        "wall_seconds": 1.0937552000395954,
+        "cycles": 4658082711,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "legacy",
+        "copy": 0,
+        "rep": 2,
+        "warmup": false,
+        "seconds": 0.897,
+        "prepare_seconds": 9.988434612751007e-08,
+        "construct_seconds": null,
+        "wall_seconds": 1.093313000164926,
+        "cycles": 4655677474,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "library",
+        "copy": 0,
+        "rep": 2,
+        "warmup": false,
+        "seconds": 0.99,
+        "prepare_seconds": 0.0,
+        "construct_seconds": null,
+        "wall_seconds": 1.2072113000322133,
+        "cycles": 5143285583,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "library",
+        "copy": 1,
+        "rep": 2,
+        "warmup": false,
+        "seconds": 0.987,
+        "prepare_seconds": 1.0011717677116394e-07,
+        "construct_seconds": null,
+        "wall_seconds": 1.2040452999062836,
+        "cycles": 5128919835,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "legacy",
+        "copy": 1,
+        "rep": 2,
+        "warmup": false,
+        "seconds": 0.896,
+        "prepare_seconds": 0.0,
+        "construct_seconds": null,
+        "wall_seconds": 1.094408700009808,
+        "cycles": 4661133876,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "legacy",
+        "copy": 2,
+        "rep": 2,
+        "warmup": false,
+        "seconds": 0.901,
+        "prepare_seconds": 9.988434612751007e-08,
+        "construct_seconds": null,
+        "wall_seconds": 1.1000208999030292,
+        "cycles": 4676528010,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "library",
+        "copy": 2,
+        "rep": 2,
+        "warmup": false,
+        "seconds": 0.991,
+        "prepare_seconds": 1.0011717677116394e-07,
+        "construct_seconds": null,
+        "wall_seconds": 1.2076290000695735,
+        "cycles": 5140611650,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "library",
+        "copy": 0,
+        "rep": 3,
+        "warmup": false,
+        "seconds": 0.989,
+        "prepare_seconds": 9.988434612751007e-08,
+        "construct_seconds": null,
+        "wall_seconds": 1.206800299929455,
+        "cycles": 5141184644,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "legacy",
+        "copy": 0,
+        "rep": 3,
+        "warmup": false,
+        "seconds": 0.901,
+        "prepare_seconds": 9.988434612751007e-08,
+        "construct_seconds": null,
+        "wall_seconds": 1.0985125000588596,
+        "cycles": 4677638357,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "legacy",
+        "copy": 1,
+        "rep": 3,
+        "warmup": false,
+        "seconds": 0.898,
+        "prepare_seconds": 0.0,
+        "construct_seconds": null,
+        "wall_seconds": 1.0936729998793453,
+        "cycles": 4657810608,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "library",
+        "copy": 1,
+        "rep": 3,
+        "warmup": false,
+        "seconds": 0.99,
+        "prepare_seconds": 1.0011717677116394e-07,
+        "construct_seconds": null,
+        "wall_seconds": 1.3186228999402374,
+        "cycles": 5147713653,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "library",
+        "copy": 2,
+        "rep": 3,
+        "warmup": false,
+        "seconds": 0.989,
+        "prepare_seconds": 1.0011717677116394e-07,
+        "construct_seconds": null,
+        "wall_seconds": 1.2071521000470966,
+        "cycles": 5142377824,
+        "checksum": "upstream checksum OK"
+      },
+      {
+        "workload": "Etc::CacheSimulation",
+        "backend": "legacy",
+        "copy": 2,
+        "rep": 3,
+        "warmup": false,
+        "seconds": 0.905,
+        "prepare_seconds": 0.0,
+        "construct_seconds": null,
+        "wall_seconds": 1.103237499948591,
+        "cycles": 4663404787,
+        "checksum": "upstream checksum OK"
+      }
+    ],
+    "summaries": [
+      {
+        "workload": "Etc::CacheSimulation",
+        "seconds": {
+          "median": {
+            "legacy": 0.898,
+            "library": 0.989
+          },
+          "min": {
+            "legacy": 0.896,
+            "library": 0.987
+          },
+          "max": {
+            "legacy": 0.905,
+            "library": 0.992
+          },
+          "ratio": 1.101336302895323
+        },
+        "prepare_seconds": {
+          "median": {
+            "legacy": 9.988434612751007e-08,
+            "library": 1.0011717677116394e-07
+          },
+          "min": {
+            "legacy": 0.0,
+            "library": 0.0
+          },
+          "max": {
+            "legacy": 1.0011717677116394e-07,
+            "library": 1.0011717677116394e-07
+          },
+          "ratio": 1.0023310023310024
+        },
+        "wall_seconds": {
+          "median": {
+            "legacy": 1.094408700009808,
+            "library": 1.2072113000322133
+          },
+          "min": {
+            "legacy": 1.0929956999607384,
+            "library": 1.2039983998984098
+          },
+          "max": {
+            "legacy": 1.103237499948591,
+            "library": 1.3186228999402374
+          },
+          "ratio": 1.1030717318140786
+        },
+        "cycles": {
+          "median": {
+            "legacy": 4661133876,
+            "library": 5142377824
+          },
+          "min": {
+            "legacy": 4653906601,
+            "library": 5128919835
+          },
+          "max": {
+            "legacy": 4677638357,
+            "library": 5161451904
+          },
+          "ratio": 1.1032461115261905
+        }
+      }
+    ]
   }
 }

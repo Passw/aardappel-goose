@@ -354,8 +354,11 @@ and current boundaries; the [benchmark report](../../bench/slot_pool.md) compare
 equivalent native workloads. The existing reusable implementation remains available unchanged.
 
 `stdlib/slice_pool.goose` packages its `items`, node array and tree state in one
-root owner. It implements the same augmented B+ tree as the builtin: first-fit
-placement, coalescing, tail reuse and overlap-safe relocation. Differential tests
+root owner. Its three tree operations are externs (`stdlib/slice_pool_internal.goose`)
+that hand `nodes` and `tree` to a copy of the builtin's runtime span tree:
+first-fit placement, coalescing and tail reuse, with overlap-safe relocation in
+Goose. The copy checks what it reads from those fields, which the program can
+write, and aborts on a node number or count that does not fit. Differential tests
 compare positions, retained views and every backing element under allocation,
 free and resize traces. See its [API](../stdlib.md#slice_pool) and
 [benchmark report](../../bench/slice_pool.md). Both pool types require fixed-size

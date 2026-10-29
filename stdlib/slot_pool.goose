@@ -5,7 +5,7 @@
 // Treat free_slots as bookkeeping and do not shrink or replace items directly.
 root struct slot_pool<T> {
     items: T[>..] = [],
-    free_slots: i64[>..<] = []
+    free_slots: i64[>..<] = [],
 }
 
 fn alloc_index<T>(pool: slot_pool<T>&, value: T) -> i64 {

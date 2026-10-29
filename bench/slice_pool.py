@@ -82,8 +82,8 @@ def generate(exe, path, source, level, calls):
     modifier = "GS_NOINLINE" if calls == "boundary" else "GS_INLINE"
     count = 0
     if calls != "natural":
-        c, count = re.subn(r"(?m)^static uint64_t (exercise_g\w*\()",
-                           rf"static {modifier} uint64_t \1", c)
+        c, count = re.subn(r"(?m)^static (gs_u64|uint64_t) (exercise_g\w*\()",
+                           rf"static {modifier} \1 \2", c)
     if calls == "boundary" and count < 2:
         raise RuntimeError("exercise call boundary was removed unexpectedly")
     if calls == "boundary" and len(re.findall(r"\bexercise_g\w*\(", c)) < count + 2:

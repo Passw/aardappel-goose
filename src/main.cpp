@@ -143,7 +143,9 @@ vector<string> StdlibDirs(const string &stdlibdir, const string &exe) {
     for (auto &dir : cands) {
         std::error_code ec;
         auto canon = filesystem::weakly_canonical(filesystem::path(dir), ec);
-        if (seen.insert(ec ? dir : canon.string()).second) dirs.push_back(dir);
+        // Normalized: its files' paths are what diagnostics and runtime errors print.
+        if (seen.insert(ec ? dir : canon.string()).second)
+            dirs.push_back(filesystem::path(dir).lexically_normal().generic_string());
     }
     return dirs;
 }

@@ -1245,15 +1245,17 @@ inline bool TypeCheck::KillPath(Node *n, VarDef *&base, string &path) {
 }
 
 // A whole assignment to the location `lval` names, which lies where `loc`
-// says, of a value v holding no references: the part of the holder it names
-// holds nothing from here on, which the stores into it before event `at`,
-// the one at which the value began to be checked, then did not put there.
-// Only the part of storage one known container holds is so emptied.
+// says, of a value v holding no references into storage -- none at all, or
+// nulls and string literals, which are static data: the part of the holder
+// it names, a slice's or a reference's own slot included, holds nothing from
+// here on, which the stores into it before event `at`, the one at which the
+// value began to be checked, then did not put there. Only the part of
+// storage one known container holds is so emptied.
 inline void TypeCheck::NoteKill(Node *lval, const Roots &loc, TypeExpr *target, const Val &v,
                                 size_t at) {
-    if (!target || !HoldsPlainRef(target) || IsRefOrSlice(target)) return;
+    if (!target || !HoldsPlainRef(target)) return;
     auto held = ContentsOf(v);
-    if (!held.None() || held.unknown || !loc.Exact()) return;
+    if (!held.OnlyStatic() || held.unknown || !loc.Exact()) return;
     auto container = loc.Root();
     if (!container || container->isglobal || IsTemp(container)) return;
     VarDef *base = nullptr;

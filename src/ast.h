@@ -556,6 +556,14 @@ struct Roots {
     bool operator==(const Roots &o) const { return Same(o); }
 
     bool None() const { return alts.empty(); }
+    // No place at all, or static data alone (an exact null root): a null or
+    // a string literal, which point into no storage a shrink could free. A
+    // null root that only bounds is the globals' depth, which a global's
+    // storage may be, so it is not static data.
+    bool OnlyStatic() const {
+        for (auto &a : alts) if (a.root || !a.exact) return false;
+        return true;
+    }
     bool Unknown() const { return alts.empty() && unknown; }
     void Clear() {
         alts.clear();

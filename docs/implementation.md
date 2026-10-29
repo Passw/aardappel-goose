@@ -2294,23 +2294,26 @@ included) is on record when the body is checked again (`CheckLoopPasses`,
 the next iteration (`CarriedEvent`).
 
 **Emptied holders** (`Kill`). A whole assignment of a value holding no
-references (`NoteKill` from `CheckAssign`, and from `PointeeAssign` through
-a reference variable) empties the part of a holder its location names
-(`KillPath`): a variable's own storage, or the pointee of a `let` reference
-or a reference parameter, followed by the field names stepped into, in the
-one container the location lies in exactly. The kill keeps the index of the
-event at which the value began to be checked. It is stored in the body state
-(`BodyState::kills`) as part of the flow state (`FlowState::kills`). A
-branch join keeps a kill that both sides made, at the earlier index; a
-loop's head takes the join of its entry with its back edges; and an `&&` or
-`||` keeps a kill that its right operand did not end. A store into the
-container that no event records (`RecordStore`: a holder's own references
-put back into it, a value pointing nowhere yet) ends the container's kills
-(`DropKills`). So does a call that may write into the part a kill names
-(`CallMayWrite` from `ApplyCalleeShrinks`), and a function value's call
-ends them all (`CheckFunValCall`). A call ends kills because a callee's own
-unrecorded stores, and a nested function's stores replayed in place under
-the events of its first check, show in no event after the kill.
+references into storage -- none, or static data alone: nulls and string
+literals, whose one root is an exact null (`Roots::OnlyStatic`) -- empties the
+part of a holder its location names (`NoteKill` from `CheckAssign`, from
+`CheckRebind` through a field path, and from `PointeeAssign` through a
+reference variable). The part (`KillPath`) is a variable's own storage, or the
+pointee of a `let` reference or a reference parameter, followed by the field
+names stepped into, down to a slice's or a reference's own slot, in the one
+container the location lies in exactly. The kill keeps the index of the event
+at which the value began to be checked. It is stored in the body state
+(`BodyState::kills`) as part of the flow state (`FlowState::kills`). A branch
+join keeps a kill that both sides made, at the earlier index; a loop's head
+takes the join of its entry with its back edges; and an `&&` or `||` keeps a
+kill that its right operand did not end. A store into the container that no
+event records (`RecordStore`: a holder's own references put back into it, a
+value pointing nowhere yet) ends the container's kills (`DropKills`). So does
+a call that may write into the part a kill names (`CallMayWrite` from
+`ApplyCalleeShrinks`), and a function value's call ends them all
+(`CheckFunValCall`). A call ends kills because a callee's own unrecorded
+stores, and a nested function's stores replayed in place under the events of
+its first check, show in no event after the kill.
 
 Only a reference to storage holding the part, or lying in it, can write
 there. So a call may write there:

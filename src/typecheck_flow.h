@@ -2939,6 +2939,7 @@ inline void TypeCheck::CheckRebind(Assign *a, LVal &lv) {
     }
     Val v;
     bool wasplain;
+    auto killat = storeevents.size();
     {
         DestScope ds(*this, lv.var ? Dest(lv.var, true) : Dest(lv, false, lv.reached));
         // `r .= &x` is the documented spelling of a rebind (§3.8), so an
@@ -2967,6 +2968,10 @@ inline void TypeCheck::CheckRebind(Assign *a, LVal &lv) {
                 lv.var->narrowed = nullptr;
             }
         }
+    } else {
+        // The slot a field path names, rebound to null, holds nothing; a
+        // variable rebound holds its binding, which is its provenance.
+        NoteKill(a->lval, lv, target, v, killat);
     }
 }
 

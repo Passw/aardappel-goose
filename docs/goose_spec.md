@@ -1563,19 +1563,22 @@ slice variable or to a holder (including the storage whose tail shrinks)
 counts as what it refers to: while the reference is live, so is whatever
 that slice or holder may refer into.
 
-A whole assignment of a value that holds no references (`refs = []`,
-`s.refs = []`, a struct literal with none in it) *empties* the part of the
-holder it writes: what was stored there before is gone. The part is a
-variable's own storage, or the pointee of a `let` reference or of a
-reference parameter (which no rebinding moves), together with the fields
-named after it. Where each slot of a holder that can hold a view into the
-array lies, on every path to the shrink, in a part emptied this way (the
-whole holder, or its fields one by one), the holder holds only what was
-stored into its storage since then. This stops being true once a store into
-that storage is made that the record cannot show, such as one moving the
-holder's own references within it. It also stops once a call runs that may
-write into the part, since a callee's stores are never on record in their
-order. These calls may write into the part:
+A whole assignment of a value that holds no references into storage
+(`refs = []`, `s.refs = []`, a struct literal with none in it) *empties* the
+part of the holder it writes: what was stored there before is gone. A null
+and a string literal are static data, which no shrink frees, so
+`s.name = ""`, `s.r .= null` and a struct literal whose reference fields
+hold only those empty their parts as well. The part is a variable's own
+storage, or the pointee of a `let` reference or of a reference parameter
+(which no rebinding moves), together with the fields named after it, down
+to a slice's or a reference's own slot. Where each slot of a holder that
+can hold a view into the array lies, on every path to the shrink, in a part
+emptied this way (the whole holder, or its fields one by one), the holder
+holds only what was stored into its storage since then. This stops being
+true once a store into that storage is made that the record cannot show,
+such as one moving the holder's own references within it. It also stops
+once a call runs that may write into the part, since a callee's stores are
+never on record in their order. These calls may write into the part:
 
 * a call handed a reference that may point at the holder's storage, with
   room for the part or lying in it, or handed anything whose references may

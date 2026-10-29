@@ -7,9 +7,9 @@
 import slice_pool_internal;
 
 root struct slice_pool<T> {
-    items: T[>..] = [],
+    items: T[>..]                       = [],
     nodes: slice_pool_detail::node[>..] = [],
-    tree: slice_pool_detail::tree = slice_pool_detail::tree { .. },
+    tree:  slice_pool_detail::tree      = slice_pool_detail::tree { .. },
 }
 inline fn slice_pool_detail::defaults<T>(p: slice_pool<T>&, first: i64, end: i64) {
     let used_end = if end < p.items.len { end } else { p.items.len };

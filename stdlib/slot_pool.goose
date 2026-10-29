@@ -4,7 +4,7 @@
 // Like reusable, double frees are logical errors, not tracked occupancy checks.
 // Treat free_slots as bookkeeping and do not shrink or replace items directly.
 root struct slot_pool<T> {
-    items: T[>..] = [],
+    items:      T[>..]    = [],
     free_slots: i64[>..<] = [],
 }
 

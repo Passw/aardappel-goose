@@ -733,7 +733,8 @@ inline void CodeGen::BindLocal(VarDef *d, Node *init, bool forlocal) {
         L(name, " = ", GenXD(init, t), ";");
         return;
     }
-    L(CT(t), " ", name, " = ", GenXD(init, t), ";");
+    auto ct = CT(t), x = GenXD(init, t);
+    L(ct, " ", name, " = ", x, ";");
 }
 
 // Declares the local `d` of a resizable or bytes type -- a resizable's

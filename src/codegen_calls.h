@@ -626,8 +626,9 @@ inline vector<string> CodeGen::EmitDispatch(Call *c, Dst d0, vector<Dst> *alldst
                     auto vt = VariantType(enumtype, (int)vi);
                     snap[vi] = T();
                     FixedLocal(vt, snap[vi], "{0}");
-                    L("if (", tag, " == ", TagConst(ei, (int)vi), ") ", snap[vi], " = *(", CT(vt),
-                      " *)(", p, " + ", ts, ");");
+                    auto tagk = TagConst(ei, (int)vi), vct = CT(vt);
+                    L("if (", tag, " == ", tagk, ") ", snap[vi], " = *(", vct, " *)(", p, " + ", ts,
+                      ");");
                 }
             }
         } else {

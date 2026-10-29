@@ -2422,6 +2422,17 @@ def main():
             r.fail("command line paths", str(e))
     r.show_task(cli_paths)
 
+    def emit_order():
+        from emit_order import check_emit_order
+        try:
+            n = check_emit_order(HERE.parent / "src")
+            r.ok(f"emit order: no two of the code generator's {n} emitting members in one "
+                 "unsequenced expression, so the C it writes is the same whichever C++ "
+                 "compiler built it")
+        except RuntimeError as e:
+            r.fail("emit order", str(e))
+    r.show_task(emit_order)
+
     def diagnostics_json():
         from diagnostics_json import check_diagnostics_json
         try:

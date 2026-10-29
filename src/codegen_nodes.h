@@ -778,9 +778,12 @@ inline void Index::CgAny(CodeGen &cg, const Dst &d) { cg.LeafAny(this, d); }
 inline void SliceExpr::CgAny(CodeGen &cg, const Dst &d) {
     // A slice stored in a variable of its own type is built in the variable.
     if (d.k == DK_LVALUE && !d.pool && d.t && d.t->kind == TY_SLICE &&
-        exprtype->kind == TY_SLICE && cg.CT(d.t) == cg.CT(exprtype) && CodeGen::IsCName(d.s)) {
-        cg.GenSlice(this, d.s);
-        return;
+        exprtype->kind == TY_SLICE) {
+        auto dct = cg.CT(d.t);
+        if (dct == cg.CT(exprtype) && CodeGen::IsCName(d.s)) {
+            cg.GenSlice(this, d.s);
+            return;
+        }
     }
     cg.LeafAny(this, d);
 }
@@ -1117,7 +1120,8 @@ inline void ForLoop::CgStmt(CodeGen &cg) {
                 CodeGen::Loc el;
                 el.t = v.elem;
                 el.s = p;
-                cg.L(cg.CT(et), " ", iv, " = ", cg.LoadLoc(el, et, line), ";");
+                auto vct = cg.CT(et), val = cg.LoadLoc(el, et, line);
+                cg.L(vct, " ", iv, " = ", val, ";");
             } else if (!vdef->copybind) {
                 cg.L("uint8_t *", iv, " = ", p, ";");
             }

@@ -1376,8 +1376,9 @@ inline void CodeGen::GenBranch(Node *n, bool when, string lbl, int exitscope) {
     if (rx) {
         // Both operands read without effect or failure, so they are taken
         // whatever the left comparison gave.
-        auto x = cat("(uint64_t)(int64_t)(", GenX(rx), ") ", b->op == T_OROR ? ">=" : "<",
-                     " (uint64_t)(int64_t)(", GenX(ry), ")");
+        auto xl = GenX(rx), xr = GenX(ry);
+        auto x = cat("(uint64_t)(int64_t)(", xl, ") ", b->op == T_OROR ? ">=" : "<",
+                     " (uint64_t)(int64_t)(", xr, ")");
         jump(when ? x : cat("!(", x, ")"));
         return;
     }
@@ -1804,7 +1805,8 @@ inline string CodeGen::GenRangeEq(TypeExpr *elem, const string &ae, const string
         L("for (int64_t ", iv, " = 0; ", t, " && ", iv, " < (", an, "); ", iv, "++) {");
         ind++;
         L(t, " = ", EqFn(elem), "(", pa, ", ", pb, ");");
-        L(pa, " += ", SizeX(elem, pa), "; ", pb, " += ", SizeX(elem, pb), ";");
+        auto sa = SizeX(elem, pa), sb = SizeX(elem, pb);
+        L(pa, " += ", sa, "; ", pb, " += ", sb, ";");
         ind--;
         L("}");
     }

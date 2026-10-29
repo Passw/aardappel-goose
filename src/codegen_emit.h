@@ -423,8 +423,8 @@ inline string CodeGen::EnsureEr(FnSpec *sp) {
     if (!ok) return ernames[sp] = "";
     auto name = Unique(cat(sinfo[sp].cname, "_er"));
     ernames[sp] = name;
-    Append(protos, "static ", FnAttrs(sp), SigRet(sp), " ", name, "(",
-           SigParams(sp, false, true), ");\n");
+    auto ret = SigRet(sp), params = SigParams(sp, false, true);
+    Append(protos, "static ", FnAttrs(sp), ret, " ", name, "(", params, ");\n");
     erqueue.push_back(sp);
     return name;
 }

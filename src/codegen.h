@@ -633,6 +633,14 @@ struct CodeGen {
     };
     vector<CScope> cscopes;
 
+    // The emitting calls (CT and the other type namers, Gen*, LoadLoc, Top,
+    // LocArgs, StrRaw, ...) append to the output or take names and numbers
+    // as they go, so the order of two of them is the order of what they
+    // emit. C++ leaves the order of a call's arguments to the compiler, and
+    // compilers differ (clang left to right, gcc and MSVC right to left);
+    // the generated C must not depend on which one built goose. Two such
+    // calls therefore never share an argument list (or any one expression):
+    // the earlier goes to a local of its own first.
     template<typename... Ts> void L(const Ts &...args) {
         body.append((size_t)ind * 4, ' ');
         Append(body, args...);
@@ -1519,9 +1527,10 @@ struct CodeGen {
         if (!fromids.empty()) data += "static GS_TLS int32_t gs_rf;\n";
         EmitGlobalDecls();
         // Prototypes for every live specialization, then their bodies.
-        for (auto sp : livespecs)
-            Append(protos, "static ", FnAttrs(sp), SigRet(sp), " ", sinfo[sp].cname, "(",
-                   SigParams(sp, false), ");\n");
+        for (auto sp : livespecs) {
+            auto ret = SigRet(sp), params = SigParams(sp, false);
+            Append(protos, "static ", FnAttrs(sp), ret, " ", sinfo[sp].cname, "(", params, ");\n");
+        }
         for (auto sp : livespecs) EmitSpec(sp);
         EmitGlobalInit();
         // Element-run twins requested by call sites, the globals'

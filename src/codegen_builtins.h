@@ -145,8 +145,8 @@ inline vector<string> CodeGen::EmitBuiltin(Call *c, Dst d0) {
             // drop the wait.
             auto t = T();
             if (an.size() == 1) {
-                L("uint8_t ", t, " = gs_thread_wait(", GenX(an[0]), ", NULL, NULL, ",
-                  LocArgs(ln), ");");
+                auto id = GenX(an[0]);
+                L("uint8_t ", t, " = gs_thread_wait(", id, ", NULL, NULL, ", LocArgs(ln), ");");
                 return { t };
             }
             // thread_wait(id, msg): the abort's message, which this wait takes
@@ -189,9 +189,12 @@ inline vector<string> CodeGen::EmitBuiltin(Call *c, Dst d0) {
             }
             return { ok };
         }
-        case B_QLIMIT:
-            L("gs_qlimit(&", QueueFor(c->qtype), ", ", GenX(an[0]), ", ", LocArgs(ln), ");");
+        case B_QLIMIT: {
+            auto q = QueueFor(c->qtype);
+            auto n = GenX(an[0]);
+            L("gs_qlimit(&", q, ", ", n, ", ", LocArgs(ln), ");");
             return {};
+        }
         case B_QGET: case B_QPOLL: {
             auto t = c->rettypes[0];
             auto q = QueueFor(t);
@@ -918,8 +921,8 @@ inline vector<string> CodeGen::EmitSlicePool(Call *c, vector<Node *> &an, Line l
         L("}");
     }
     auto r = T();
-    L(CT(ast.SliceOf(elem, ln)), " ", r, " = { (", CT(elem), " *)(", ElemAddr(v, i), "), ", n,
-      " };");
+    auto sct = CT(ast.SliceOf(elem, ln)), ect = CT(elem);
+    L(sct, " ", r, " = { (", ect, " *)(", ElemAddr(v, i), "), ", n, " };");
     return { r };
 }
 

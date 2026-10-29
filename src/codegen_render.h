@@ -309,7 +309,8 @@ inline string CodeGen::RefArg(const Loc &lv, TypeExpr *sub, Line ln) {
         // An i64 read out of varint storage, which holds no i64: the
         // overload is given a temporary holding the value (CheckPrintable).
         auto x = T();
-        L(CT(sub), " ", x, " = ", LoadLoc(lv, sub, ln), ";");
+        auto ct = CT(sub), val = LoadLoc(lv, sub, ln);
+        L(ct, " ", x, " = ", val, ";");
         return cat("&", x);
     }
     return lv.val ? cat("&", lv.s) : cat("(", CT(sub), " *)(", lv.s, ")");

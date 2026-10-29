@@ -1399,9 +1399,9 @@ inline void CodeGen::EmitEqFixed(string &bo, TypeExpr *t) {
             for (size_t vi = 0; vi < ei->en->variants.size(); vi++) {
                 if (EmptyLayout(ei->en->variants[vi].fields)) continue;
                 auto un = cat("u.v_", Sanitize(ei->en->variants[vi].name));
-                Append(bo, "    case ", TagConst(ei, (int)vi), ": return ",
-                       EqX(VariantType(t, (int)vi), cat("a->", un), cat("b->", un)),
-                       ";\n");
+                auto tagk = TagConst(ei, (int)vi);
+                auto eq = EqX(VariantType(t, (int)vi), cat("a->", un), cat("b->", un));
+                Append(bo, "    case ", tagk, ": return ", eq, ";\n");
             }
             Append(bo, "    default: return 1;\n    }\n");
             return;

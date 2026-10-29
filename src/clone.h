@@ -693,7 +693,10 @@ template<typename F> void NodeNamedArrays(Node *n, set<TypeExpr *> &seen, F f) {
     type(n->exprtype);
     NodeVars(n, [&](VarDef *v) { if (v) type(v->type); });
     if (auto c = Is<Call>(n)) for (auto t : c->rettypes) type(t);
-    if (auto c = Is<AsCast>(n)) type(c->type);
+    // A cast checks against its concrete target (AsCast::totype): in a
+    // generic body the written type is the parameter's name, and the slot
+    // the result lands in (exprtype) may be a wider plain integer.
+    if (auto c = Is<AsCast>(n)) type(c->totype ? c->totype : c->type);
 }
 
 }  // namespace goose

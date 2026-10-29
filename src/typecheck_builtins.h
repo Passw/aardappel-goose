@@ -483,6 +483,13 @@ inline Val TypeCheck::CheckBuiltin(Call *c, const BuiltinDef &d, vector<Node *> 
             // zero. Other origins are checked at runtime unless proven here.
             c->poolcheck = !RootedAtReceiver(rv, sv, elem);
         }
+        // What a failed check aborts with in place of the runtime's message,
+        // which a library words in its own terms (§3.3).
+        if (args.size() == 3) {
+            CheckArg(args[2], u8slice);
+            if (!Is<StrLit>(args[2]))
+                Error(args[2], cat(".", d.name, " takes its abort message as a string literal"));
+        }
     }
     // A slice pool's operations (§5.4). A slice handed back must be one of
     // the pool's own, by the same exact root index_of needs, so that the

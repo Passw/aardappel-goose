@@ -1722,7 +1722,7 @@ inline FnSpec *TypeCheck::GetOrCreateSpec(MatchInfo &mi, vector<Val> &argvals, N
         // A member of a cycle whose next round has yet to check it again.
         if (spec->stale) {
             spec->stale = false;
-            CheckSpecBodyOnce(spec, &argvals, callnode->line);
+            CheckSpecBodyOnce(spec, &argvals, callnode->line, Is<Call>(callnode));
         } else if (!spec->inprogress) {
             ReplayOuterExits(spec);
             ReplayEnvExits(spec);
@@ -1755,7 +1755,7 @@ inline FnSpec *TypeCheck::GetOrCreateSpec(MatchInfo &mi, vector<Val> &argvals, N
     // site's: it leaves no specialization behind for a later call to reuse.
     NoteLitArgs(spec, argvals, callnode);
     sf->specs.push_back(spec);
-    CheckSpecBody(spec, &argvals, callnode->line);
+    CheckSpecBody(spec, &argvals, callnode->line, Is<Call>(callnode));
     NoteCalleeEnvReads(spec);
     return spec;
 }
@@ -2775,14 +2775,15 @@ inline int TypeCheck::EnvReach(const MatchInfo &mi) {
 // it broken. A member the last round no longer reaches stays stale: its
 // record, read by no call of that round, settled with nothing, so a call
 // after the cycle is checked does not reuse it (GetOrCreateSpec).
-inline void TypeCheck::CheckSpecBody(FnSpec *spec, vector<Val> *argvals, Line callline) {
+inline void TypeCheck::CheckSpecBody(FnSpec *spec, vector<Val> *argvals, Line callline,
+                                     Call *call) {
     ast.CheckCancel();
     struct RoundScope {
         TypeCheck &tc;
         RoundScope(TypeCheck &t) : tc(t) { tc.cyclerounds.push_back({ tc.CurDepth(), false }); }
         ~RoundScope() { tc.cyclerounds.pop_back(); }
     } roundscope(*this);
-    CheckSpecBodyOnce(spec, argvals, callline);
+    CheckSpecBodyOnce(spec, argvals, callline, call);
     while (spec->incycle && CycleHead(spec) == spec) {
         // Bound cycles that do not settle. Completion proofs accumulate, but
         // pruning a newly unreachable continuation can remove other effects.
@@ -2800,7 +2801,7 @@ inline void TypeCheck::CheckSpecBody(FnSpec *spec, vector<Val> *argvals, Line ca
             m->stale = m != spec;
         }
         cyclerounds.back().changed = false;
-        CheckSpecBodyOnce(spec, argvals, callline);
+        CheckSpecBodyOnce(spec, argvals, callline, call);
         for (auto &[cls, tc] : threadedclasses) broken -= tc.broken;
         auto outer = cyclerounds.back().changed;
         if (outer && getenv("GOOSE_ROUNDS"))
@@ -2892,7 +2893,8 @@ inline bool TypeCheck::SameRecord(const FnRecord &a, const FnRecord &b, const Fn
     return true;
 }
 
-inline void TypeCheck::CheckSpecBodyOnce(FnSpec *spec, vector<Val> *argvals, Line callline) {
+inline void TypeCheck::CheckSpecBodyOnce(FnSpec *spec, vector<Val> *argvals, Line callline,
+                                         Call *call) {
     // In progress from here, so that an error before the body's check, an
     // extern's included, leaves it failed (Checkpoint).
     spec->inprogress = true;
@@ -2949,6 +2951,7 @@ inline void TypeCheck::CheckSpecBodyOnce(FnSpec *spec, vector<Val> *argvals, Lin
     f.expansiontrace = ActiveExpansionTrace();
     f.exits = &exits;
     f.argvals = argvals;
+    f.call = call;
     frames.push_back(f);
     auto fi = (int)frames.size() - 1;
     // The caller's body state is its own (BodyState): this body's loops run

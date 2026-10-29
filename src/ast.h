@@ -1491,6 +1491,10 @@ struct SFunction {
     // (os.trim_memory): each caller, and transitively theirs, publishes all
     // of its cached tops before the call (CodeGen::CollectSpecs, SyncReach).
     bool readsalltops = false;
+    // A runtime entry point that reports a failure where the program called
+    // the standard library: it takes a trailing const gs_loc * (runtime.h),
+    // which its callers pass as they do a library function's (CodeGen::CallerLoc).
+    bool takesloc = false;
     bool isnested = false;
     SFunction *outer = nullptr;     // The function a nested one is declared in.
     Block *body = nullptr;
@@ -2518,6 +2522,11 @@ struct Ast {
     }
     vector<Package> packages;
     vector<int> filepkg;                                // Per source, its package.
+    bool StdlibFile(int fileidx) const {
+        if (fileidx < 0 || fileidx >= (int)filepkg.size()) return false;
+        auto pkg = filepkg[fileidx];
+        return pkg >= 0 && pkg < (int)packages.size() && packages[pkg].stdlib;
+    }
 
     vector<Node *> allnodes;
     vector<TypeExpr *> alltypes;

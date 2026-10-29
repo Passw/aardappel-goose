@@ -21,8 +21,8 @@ inline fn slice_pool_detail::defaults<T>(p: slice_pool<T>&, first: i64, end: i64
 // Copy before defaulting, with memmove ordering even when a freed prefix lets
 // the new run overlap the old one. New array elements are always initialized.
 fn slice_pool_detail::finish<T>(p: slice_pool<T>&, idx: i64, n: i64, old_idx: i64, old: T[:]) -> T[:] {
-    if idx < 0 || idx > p.items.len { abort("slice_pool: invalid free span"); }
-    let end = p.items.check_length(idx + n);
+    if idx < 0 || idx > p.items.len { abort("slice_pool.realloc_slice: span tree is corrupt"); }
+    let end = p.items.check_length(idx + n, "slice_pool.realloc_slice: pool would outgrow its data stack");
     if old.len != 0 && idx != old_idx {
         let available = p.items.len - idx;
         var existing = old.len;
@@ -37,24 +37,24 @@ fn slice_pool_detail::finish<T>(p: slice_pool<T>&, idx: i64, n: i64, old_idx: i6
 }
 
 inline fn alloc_slice<T>(p: slice_pool<T>&, n: i64) -> T[:] {
-    let count = p.items.check_length(n);
+    let count = p.items.check_length(n, "slice_pool.alloc_slice: invalid slice length");
     let idx = if count == 0 || p.nodes.len == 0 { p.items.len } else { slice_pool_detail::place(p.nodes, p.tree, p.items.len, count) };
-    if idx < 0 || idx > p.items.len { abort("slice_pool: invalid free span"); }
-    let end = p.items.check_length(idx + count);
+    if idx < 0 || idx > p.items.len { abort("slice_pool.alloc_slice: span tree is corrupt"); }
+    let end = p.items.check_length(idx + count, "slice_pool.alloc_slice: pool would outgrow its data stack");
     slice_pool_detail::defaults(p, idx, end);
     return p.items[idx..end];
 }
 fn free_slice<T>(p: slice_pool<T>&, s: T[:]) {
-    let idx = p.items.range_index(s);
+    let idx = p.items.range_index(s, "slice_pool.free_slice: slice is not from this pool");
     slice_pool_detail::release_run(p.nodes, p.tree, idx, s.len);
 }
 
 // Initialize directly from source values, including overlapping views of items.
 inline fn alloc_copy<T>(p: slice_pool<T>&, src: T[:]) -> T[:] {
-    let count = p.items.check_length(src.len);
+    let count = p.items.check_length(src.len, "slice_pool.alloc_copy: invalid slice length");
     let idx = if count == 0 || p.nodes.len == 0 { p.items.len } else { slice_pool_detail::place(p.nodes, p.tree, p.items.len, count) };
-    if idx < 0 || idx > p.items.len { abort("slice_pool: invalid free span"); }
-    let end = p.items.check_length(idx + count);
+    if idx < 0 || idx > p.items.len { abort("slice_pool.alloc_copy: span tree is corrupt"); }
+    let end = p.items.check_length(idx + count, "slice_pool.alloc_copy: pool would outgrow its data stack");
     let available = p.items.len - idx;
     let existing = if count < available { count } else { available };
     // Append beyond all source elements before overwriting a shared prefix.
@@ -63,8 +63,8 @@ inline fn alloc_copy<T>(p: slice_pool<T>&, src: T[:]) -> T[:] {
     return p.items[idx..end];
 }
 fn realloc_slice<T>(p: slice_pool<T>&, s: T[:], n: i64) -> T[:] {
-    let count = p.items.check_length(n);
-    let idx = p.items.range_index(s);
+    let count = p.items.check_length(n, "slice_pool.realloc_slice: invalid slice length");
+    let idx = p.items.range_index(s, "slice_pool.realloc_slice: slice is not from this pool");
     if count <= s.len {
         slice_pool_detail::release_run(p.nodes, p.tree, idx + count, s.len - count);
         return p.items[idx..idx + count];

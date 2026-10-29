@@ -4158,7 +4158,10 @@ pointee, or a slice where a limited array is wanted. There the destination
 loads or adapts the value as its type asks (`GenXD`, `CallVal0`). Every
 lvalue destination an inlined body can reach names that type (`Dst::t`),
 including the temporary that receives a function value's call's value and
-the global an initializer sets.
+the global an initializer sets. A standard library body copied into the
+program's own code has its library nodes anchored at the call
+(`Inliner::AtCallSite`), so a check in the copy fails at the line that called
+the library, as a check in a call left standing does (§6.4, `gs_at`).
 
 At each call site of a callee K, K is inlined if it is used once, or its
 post-optimization node count is below NC, or count times uses is below NCU
@@ -4897,7 +4900,9 @@ a select (the merge step
 such a line must have the annotated outcome. The `test/optimizer/bce*.goose`
 fixtures check these decisions and also run as ordinary programs, allowing
 output checks to catch incorrect elimination. `--bce-lines` prints the
-per-line counts for comparing two builds of the pass; `bench/bce_ab.py`
+per-line counts for comparing two builds of the pass; a check in standard
+library code inlined into the program's counts on the line of the call
+(`Inliner::AtCallSite`). `bench/bce_ab.py`
 measures the whole pass against `--no-bce`. `bench/bce_fuzz.py` runs random
 programs built from loop shapes the pass targets, with off-by-one
 mutations, through the JIT with the pass on and off. An elided check that
@@ -5151,7 +5156,20 @@ member like any other. Everything but the statics is initialized by
   other than the first fixed result; per nonfixed result, a destination
   `gs_stack *` and, for a resizable, the count out-parameter or frame
   object out-parameter);
-* `gs_sp`, when the function touches stacks.
+* `gs_sp`, when the function touches stacks;
+* `const gs_loc *gs_at`, for a standard library function
+  (`SpecInfo::located`).
+
+`gs_at` is where the program called the library: each check and `abort` in
+the function's own lines reports it (`LocArgs`), and a call to another
+library function passes it on, so a failure names the line of the program's
+code that the chain of library calls started from. A call from the program's
+code passes a static `gs_loc` of its own line (`CallerLoc`); a worker's thunk
+passes its function's line. The program's function values that a library
+function runs have the program's own lines, and report those. The pointer is
+read only on a failing path. A runtime entry point
+that reports at the caller's place takes one too (`SFunction::takesloc`: the
+slice pool externs). Exports and `main` take none.
 
 The C return value is the first small fixed result eligible for native
 return, even when it is not result zero; with none it is `void`. A fixed
@@ -6513,8 +6531,9 @@ must be one the node has room for or holds. A node reached at two levels of
 a path, or one the chain hands out while it is still in the tree, keeps
 every access inside the nodes: each count the copy writes fits a leaf, and
 the counts that index an inner node's children are checked where they are
-read. A check that fails aborts with `GS_E_SPANTREE`, without a Goose
-location (`gs_fail` with a NULL file). A wrong tree that passes them hands
+read. A check that fails aborts with `GS_E_SPANTREE` at the `gs_loc` the
+extern was passed (`SFunction::takesloc`), the program's call into
+`slice_pool`, which `gs_spcpath` carries. A wrong tree that passes them hands
 out wrong spans, which `slice_pool`'s own check against its length catches
 where they start past it. Sums of stored indices and counts wrap rather than
 overflow, and new nodes past the last are zeroed, as a pushed `node { .. }`

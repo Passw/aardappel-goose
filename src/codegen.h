@@ -214,7 +214,14 @@ struct CodeGen {
 
     // Abort locations: the file path becomes one static string per source
     // file in the generated code; call sites pass it plus the line number.
+    // A check in a standard library function fails where the program called
+    // the library: such a function takes that call's location, a static
+    // gs_loc, as its last parameter, gs_at, reports its own lines there, and
+    // passes it on to the library functions it calls (SpecInfo::located).
+    // Library code inlined into the program's is anchored at the call
+    // already (Inliner::AtCallSite).
     map<int, string> filerefs;
+    map<pair<int, int>, string> locrefs;
 
     string FileRef(Line l) {
         auto it = filerefs.find(l.fileidx);
@@ -228,7 +235,23 @@ struct CodeGen {
         }
         return it->second;
     }
-    string LocArgs(Line l) { return cat(FileRef(l), ", ", l.line); }
+    bool AtCaller(Line l) { return curinfo && curinfo->located && ast.StdlibFile(l.fileidx); }
+    string LocFile(Line l) { return AtCaller(l) ? string("gs_at->file") : FileRef(l); }
+    string LocLine(Line l) { return AtCaller(l) ? string("gs_at->line") : cat(l.line); }
+    string LocArgs(Line l) { return cat(LocFile(l), ", ", LocLine(l)); }
+    // What a call at l hands a callee that takes its caller's location.
+    string CallerLoc(Line l) {
+        if (AtCaller(l)) return "gs_at";
+        auto key = make_pair(l.fileidx, l.line);
+        auto it = locrefs.find(key);
+        if (it == locrefs.end()) {
+            auto file = FileRef(l);
+            auto name = Unique(cat("gs_loc", locrefs.size()));
+            Append(data, "static const gs_loc ", name, " = { ", file, ", ", l.line, " };\n");
+            it = locrefs.emplace(key, name).first;
+        }
+        return cat("&", it->second);
+    }
 
     // The trailing arguments of a gs_add/sub/mul/neg helper call: a signed
     // type's operation takes its location, for the debug build's overflow
@@ -445,7 +468,8 @@ struct CodeGen {
     //   [free-variable references, §7.5]
     //   [out-pointers for fixed returns after the first]
     //   [destination stacks for nonfixed returns]
-    //   [int64_t gs_sp].
+    //   [int64_t gs_sp]
+    //   [const gs_loc *gs_at, for a standard library function].
     // The C return value is the first fixed return, else void; a `return ...
     // from` discriminant travels in the thread-local gs_rf, not the signature.
 
@@ -456,6 +480,7 @@ struct CodeGen {
         bool needssp = false;
         bool hasrf = false;
         bool readsalltops = false;   // Transitively reads every data-stack top.
+        bool located = false;        // Takes its caller's location (CallerLoc).
         int cret = -1;               // Ret index returned as the C value.
     };
     unordered_map<FnSpec *, SpecInfo> sinfo;
@@ -1400,7 +1425,9 @@ struct CodeGen {
     vector<string> EmitSlicePool(Call *c, vector<Node *> &an, Line ln);
     string SpanArgs(const Loc &lv);
     string PlaceRun(const Loc &lv, const string &n);
-    string SliceLen(Node *n, TypeExpr *elem, Line ln, const char *error = "GS_E_SLICELEN");
+    string SliceLen(Node *n, TypeExpr *elem, Line ln, const char *error = "GS_E_SLICELEN",
+                    Node *msg = nullptr);
+    string FailCall(const char *error, Node *msg, Line ln);
     void EmitSliceExtend(const Loc &lv, const string &end, int64_t esz);
     void EmitDefaultElems(const ArrView &v, const string &first, const string &count, Node *init);
     bool BulkDefaultLoop(ForLoop *loop);

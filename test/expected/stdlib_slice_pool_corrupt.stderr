@@ -1,1 +1,2 @@
-slice_pool: invalid free span
+slice_pool.alloc_slice: span tree is corrupt
+stdlib_slice_pool_corrupt.goose:8)

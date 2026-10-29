@@ -589,8 +589,11 @@ use-after-free and double-free detection require application bookkeeping.
 Do not shrink/replace `items` or modify allocator bookkeeping directly.
 
 Wrong-pool slot frees through `free_ref` retain `index_of`'s compile-time check.
-Wrong-pool nonempty slice frees currently fail a runtime containment check;
-there is no compile-time warning yet. Empty slices from any origin are harmless.
+Wrong-pool nonempty slice frees currently fail a runtime containment check
+(`slice_pool.free_slice: slice is not from this pool`); there is no
+compile-time warning yet. Empty slices from any origin are harmless. Like
+every check inside the standard library, the pools' report the line of the
+program that called them.
 Eligible `items` can be serialized independently, but this omits allocator state.
 Whole root owners cannot be serialized or copied to workers automatically.
 For flat elements, [the worker snapshot sample](../samples/32_pool_worker_snapshots.goose)
@@ -767,9 +770,10 @@ invalid frees, and accessing a logically freed run are application errors.
 `nodes` and `tree` as internal bookkeeping, and do not shrink or replace `items`.
 Ordinary bounds and lifetime checks still apply to these public fields. The
 runtime checks every node number and entry count it reads from them: one a
-program wrote wrong aborts with `slice pool span tree is corrupt`, which names
-no source line. A span edited to start past `items` aborts as an invalid free
-span; other edited spans can hand elements out twice, as a double free can.
+program wrote wrong aborts with `slice pool span tree is corrupt`. A span
+edited to start past `items` aborts with `span tree is corrupt` from the
+operation that drew it; other edited spans can hand elements out twice, as a
+double free can.
 `recycle_all` makes the entire high-water range one free run and recycles all
 metadata nodes. It retains initialized values, backing storage and existing
 views; the next allocation starts at index zero.

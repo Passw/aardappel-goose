@@ -218,10 +218,11 @@ struct TypeCheck {
         // checked inside it, or past them for the state being checked now.
         int bodyidx = 0;
         // A specialization's body being checked (CheckSpecBodyOnce): its exits,
-        // and the arguments of the call it is checked for, as the caller
+        // and the call it is checked for and its arguments, as the caller
         // checked them, where there is one.
         BodyExits *exits = nullptr;
         vector<Val> *argvals = nullptr;
+        Call *call = nullptr;
     };
 
     enum ScopeKind { SK_PLAIN, SK_FN, SK_LOOP, SK_BLOCK, SK_EXPANSION, SK_DEFER };
@@ -573,11 +574,7 @@ struct TypeCheck {
         ErrorIn(LocOf(l), msg, Chain(ActiveExpansionTrace()));
     }
 
-    bool StdlibLocation(DiagLoc at) const {
-        if (at.fileidx < 0 || at.fileidx >= (int)ast.filepkg.size()) return false;
-        auto pkg = ast.filepkg[at.fileidx];
-        return pkg >= 0 && pkg < (int)ast.packages.size() && ast.packages[pkg].stdlib;
-    }
+    bool StdlibLocation(DiagLoc at) const { return ast.StdlibFile(at.fileidx); }
 
     void LibraryCallLocation(Diagnostic &d) {
         if (!StdlibLocation(d.where)) return;
@@ -1763,6 +1760,7 @@ struct TypeCheck {
     void ArrayElemsReached(TypeExpr *t, vector<TypeExpr *> &out, vector<TypeExpr *> &open);
     void AppendArrayElemsReached(TypeExpr *t, vector<TypeExpr *> &out);
     bool RootedAtReceiver(const Val &rv, const Val &av, TypeExpr *elem);
+    string LibraryParamArg(VarDef *root);
     void CheckRootedAtReceiver(Call *c, const char *op, const Val &rv, const Val &av, TypeExpr *elem,
                                const char *what, const char *sec);
 
@@ -2379,7 +2377,8 @@ struct TypeCheck {
     static const FnRecord *RecordOf(const FnSpec *spec) {
         return spec->inprogress ? spec->prev.get() : &spec->record;
     }
-    void CheckSpecBodyOnce(FnSpec *spec, vector<Val> *argvals, Line callline);
+    void CheckSpecBodyOnce(FnSpec *spec, vector<Val> *argvals, Line callline,
+                           Call *call = nullptr);
     bool SameRecord(const FnRecord &a, const FnRecord &b, const FnSpec *spec);
     bool ExternValueOk(TypeExpr *t, string &why);
     bool ExternParamOk(TypeExpr *t, string &why);
@@ -2389,7 +2388,7 @@ struct TypeCheck {
     int ClassDepth(VarDef *r);
     vector<VarDef *> NarrowedOptionals(const MatchInfo &mi);
     int EnvReach(const MatchInfo &mi);
-    void CheckSpecBody(FnSpec *spec, vector<Val> *argvals, Line callline);
+    void CheckSpecBody(FnSpec *spec, vector<Val> *argvals, Line callline, Call *call = nullptr);
     void RecordReturn(FnSpec *tspec, vector<Val> &vals, Node *at);
     void NamedResultCopyWarning(FnSpec *spec);
     Val RetAltVal(FnSpec *spec, const RootAlt &alt, vector<Val> &argvals, TypeExpr *t, Node *at);

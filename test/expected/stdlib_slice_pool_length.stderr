@@ -1,1 +1,2 @@
-invalid array length
+slice_pool.realloc_slice: invalid slice length
+stdlib_slice_pool_length.goose:6)

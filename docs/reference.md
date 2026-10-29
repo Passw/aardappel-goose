@@ -906,8 +906,8 @@ read the same way.
 | `.resize(n, v)`, `.resize(n)` | the same | grows with copies of `v`, or shrinks |
 | `.clear()` | the same | empties the array |
 | `.index_of(r) -> i64` | arrays of fixed-size elements | the index of the element `r` refers to |
-| `.range_index(s) -> i64` | the same | the start of a wholly contained slice; checked when provenance does not prove it |
-| `.check_length(n) -> i64` | grow-only, grow-shrink, fixed-size elements | validates a count against the data-stack reservation; returns it without changing the array |
+| `.range_index(s, msg?) -> i64` | the same | the start of a wholly contained slice; checked when provenance does not prove it |
+| `.check_length(n, msg?) -> i64` | grow-only, grow-shrink, fixed-size elements | validates a count against the data-stack reservation; returns it without changing the array |
 
 Growth always supplies element values: there is no operation that exposes
 an uninitialized slot. Exceeding a limited array's capacity aborts; so does
@@ -920,7 +920,9 @@ An empty slice, including a default or foreign empty slice, returns zero.
 `check_length` rejects negative counts and counts whose elements alone would
 exceed a data-stack reservation, including oversized unsigned counts. It neither
 allocates storage nor promises that an append fits the array's remaining space.
-Both checks apply in every build.
+Both checks apply in every build. A string literal as a last argument,
+`a.range_index(s, "msg")`, is the message a failed check aborts with instead
+of the runtime's own; the standard library's pools word theirs this way.
 `dst.move_from(src)` requires equal lengths and aborts before writing if they
 differ. It copies the original source values even when the slices overlap;
 the source is not cleared. Both operands are evaluated once, left to right.
@@ -3022,7 +3024,9 @@ fn blur_row(above: u8[:], here: u8[:], below: u8[:], out: u8[:]) {
 aborts that remain in every build are division by zero, a limited
 array's capacity overflow, shrinking below empty, a relative-reference
 offset that does not fit its width, a failed `assert`, and data-stack
-exhaustion. All of them are clean aborts with a message. Spec §9.3, §10.5.
+exhaustion. All of them are clean aborts with a message and the line of
+the check that failed; a check inside a standard library function names the
+line of the program's code that called the library. Spec §9.3, §10.5.
 
 ---
 

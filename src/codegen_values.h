@@ -762,10 +762,10 @@ inline void CodeGen::EmitHoistedCheck(Index *ta, Index *ea, const string &c) {
     while (lv.t->kind == TY_REF) DerefLoc(lv);
     auto v = ArrayView(lv);
     auto idx = GenPure(ta->idx);
-    auto tl = ta->line, el = ea->line;
-    auto file = tl.fileidx == el.fileidx
-                    ? FileRef(tl) : cat("(", c, ") ? ", FileRef(tl), " : ", FileRef(el));
-    auto line = tl.line == el.line ? cat(tl.line) : cat("(", c, ") ? ", tl.line, " : ", el.line);
+    auto tf = LocFile(ta->line), ef = LocFile(ea->line);
+    auto tl = LocLine(ta->line), el = LocLine(ea->line);
+    auto file = tf == ef ? tf : cat("(", c, ") ? ", tf, " : ", ef);
+    auto line = tl == el ? tl : cat("(", c, ") ? ", tl, " : ", el);
     L("(void)GS_IDX((int64_t)(", idx, "), ", v.len, ", ", file, ", ", line, ");");
 }
 

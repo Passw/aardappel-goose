@@ -443,8 +443,11 @@ every build. `a.check_length(n) -> i64`, on resizable arrays of fixed-size
 elements, rejects a negative count or one whose element bytes exceed a
 data-stack reservation and otherwise returns the count. It evaluates the count
 once and changes no storage; it does not reserve space or check the space left
-after the array's current contents. These operations do not weaken `index_of`'s
-static provenance requirement.
+after the array's current contents. Either takes a string literal as a last
+argument, `a.range_index(s, "msg")` or `a.check_length(n, "msg")`: a failed
+check then aborts with that message, as `abort("msg")` would, which lets a
+library say what went wrong in its own terms. These operations do not weaken
+`index_of`'s static provenance requirement.
 
 `dst.move_from(src)` copies the values of a slice into a writable slice of the
 same fixed-size element type. Lengths must agree; a mismatch aborts before any
@@ -3848,6 +3851,11 @@ the last two ends only that worker:
   holds, §7.8), which aborts safely in the same way, with a diagnostic of
   its own.
 
+An abort's message ends with the source location of the check that failed.
+A check inside a standard library function (§11.1), or an `abort` there,
+reports the place in the program's own code that called the library instead:
+the call that, through any further library functions, led to it.
+
 `exit(code)` ends the program normally with the given process exit code.
 Neither `abort` nor `exit` returns, and the checker takes this into
 account: code after them is unreachable, so a branch ending in one of them
@@ -4511,8 +4519,8 @@ And the array members, ordinary functions of their receiver per UFCS
 | `.append(src)` | limited, grow-only, grow-shrink | an array or slice of elements (§3.3) |
 | `.pop() -> T`, `.pop_n(n)`, `.resize(n, v?)`, `.clear()` | limited, grow-shrink; grow-only where §5.1 allows a shrink | shrinking, and growing with a fill value (§3.3, §5) |
 | `.index_of(r) -> i64` | fixed, limited, grow-only, grow-shrink | the index of the element `r` refers to (§3.3) |
-| `.range_index(s) -> i64` | the same, fixed-size elements | checked start of a contained slice; zero for empty (§3.3) |
-| `.check_length(n) -> i64` | grow-only, grow-shrink, fixed-size elements | validate a count without allocating (§3.3) |
+| `.range_index(s, msg?) -> i64` | the same, fixed-size elements | checked start of a contained slice; zero for empty (§3.3) |
+| `.check_length(n, msg?) -> i64` | grow-only, grow-shrink, fixed-size elements | validate a count without allocating (§3.3) |
 | `.move_from(src)` | slices, fixed-size elements | checked equal-length copy, safe for overlapping slices (§3.3) |
 | `.alloc_index(v) -> i64`, `.alloc_ref(v) -> T&`, `.free(i)` | deprecated `reusable` pools | slot reuse (§5.4); prefer stdlib `slot_pool<T>` |
 | `.alloc_slice(n) -> T[:]`, `.realloc_slice(s, n) -> T[:]`, `.free_slice(s)` | deprecated `reusable[]` pools | slice reuse (§5.4); prefer stdlib `slice_pool<T>` |

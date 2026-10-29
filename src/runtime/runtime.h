@@ -209,6 +209,13 @@ enum {
     GS_E_SPANTREE,     /* a stdlib slice_pool's nodes and tree are no span tree */
 };
 
+/* A place in the program's source: where a standard library function
+   called from there reports its failures (codegen.h CallerLoc). */
+typedef struct {
+    const char *file;
+    int line;
+} gs_loc;
+
 GS_API GS_NORETURN void gs_panic(const char *msg);
 GS_API GS_NORETURN void gs_abort(int err, const char *file, int line);
 /* The program's own abort(msg) (§9.3): the message is Goose bytes, not a C

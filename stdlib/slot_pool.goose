@@ -50,7 +50,7 @@ fn alloc_index_with<T, F>(pool: slot_pool<T>&) -> i64 {
 }
 
 fn free<T>(pool: slot_pool<T>&, i: i64) {
-    if i < 0 || i >= pool.items.len { abort("slot_pool.free: index out of bounds"); }
+    if i < 0 || i >= pool.items.len { abort("slot_pool.free: index is not a slot of this pool"); }
     pool.free_slots.push(i);
 }
 

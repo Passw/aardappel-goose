@@ -1,4 +1,5 @@
 // error: .index_of needs a reference rooted at the array itself
+// error: this one is value, which free_ref takes as a parameter, from any root
 import slot_pool;
 struct Indices { a: u32 in first.items, b: u32 in second.items }
 var first = slot_pool<i64> {};

@@ -239,6 +239,14 @@ R"GSRT(enum {
 };
 
 )GSRT"
+R"GSRT(/* A place in the program's source: where a standard library function
+   called from there reports its failures (codegen.h CallerLoc). */
+typedef struct {
+    const char *file;
+    int line;
+} gs_loc;
+
+)GSRT"
 R"GSRT(GS_API GS_NORETURN void gs_panic(const char *msg);
 GS_API GS_NORETURN void gs_abort(int err, const char *file, int line);
 /* The program's own abort(msg) (§9.3): the message is Goose bytes, not a C
@@ -4002,11 +4010,14 @@ GS_API uint8_t gs_trim_memory(void);
 /* std's slice_pool (stdlib/slice_pool_internal.goose) keeps its freelist in
    a checked copy of the runtime's span tree (runtime_os.h): `nodes` is a
    node[>..] of GS_SPAN_NODE-byte nodes, and `tree` its header, a field
-   beside it. */
-GS_API int64_t gs_slice_pool_place(gs_rref nodes, void *tree, int64_t len, int64_t cnt);
-GS_API void gs_slice_pool_free(gs_rref nodes, void *tree, int64_t idx, int64_t cnt);
+   beside it. A corrupt tree is reported at `at`, where the program called
+   slice_pool (SFunction::takesloc). */
+GS_API int64_t gs_slice_pool_place(gs_rref nodes, void *tree, int64_t len, int64_t cnt,
+                                   const gs_loc *at);
+GS_API void gs_slice_pool_free(gs_rref nodes, void *tree, int64_t idx, int64_t cnt,
+                               const gs_loc *at);
 GS_API int64_t gs_slice_pool_regrow(gs_rref nodes, void *tree, int64_t len, int64_t idx,
-                                    int64_t ol, int64_t cnt);
+                                    int64_t ol, int64_t cnt, const gs_loc *at);
 )GSRT"
     ) },
     { "runtime_os.h", string_view(
@@ -4833,6 +4844,7 @@ R"GSRT(typedef struct {
     uint8_t *base;
     int64_t *n;
     uint8_t **top;
+    const gs_loc *at;    /* The call that a corrupt tree is reported at. */
     int64_t h, node[GS_SPAN_DEPTH], pos[GS_SPAN_DEPTH];
 } gs_spcpath;
 
@@ -4848,18 +4860,20 @@ R"GSRT(/* Macros rather than functions, which TinyCC would call at every level. 
 #define GS_SPBADH(h) ((uint64_t)(h) >= GS_SPAN_DEPTH)
 
 )GSRT"
-R"GSRT(static GS_NORETURN void gs_spc_corrupt(void) { gs_abort(GS_E_SPANTREE, NULL, 0); }
+R"GSRT(static GS_NORETURN void gs_spc_corrupt(const gs_spcpath *p) {
+    gs_abort(GS_E_SPANTREE, p->at->file, p->at->line);
+}
 
 )GSRT"
-R"GSRT(#define GS_SPSTART(p, tree, nodes) \
+R"GSRT(#define GS_SPSTART(p, tree, nodes, loc) \
     ((p)->hd = (gs_sphead *)(tree), (p)->base = (nodes).hdr->base, (p)->n = &(nodes).hdr->len, \
-     (p)->top = &(nodes).stk->top)
+     (p)->top = &(nodes).stk->top, (p)->at = (loc))
 
 )GSRT"
 R"GSRT(static int64_t gs_spc_newnode(gs_spcpath *p) {
     int64_t i = GS_SPCHEAD(p)->chain;
     if (i) {
-        if (GS_SPBADNUM(p, i)) gs_spc_corrupt();
+        if (GS_SPBADNUM(p, i)) gs_spc_corrupt(p);
         GS_SPCHEAD(p)->chain = GS_SPLEAF(p, i)->link;
         return i;
     }
@@ -4876,9 +4890,9 @@ R"GSRT(static void gs_spc_dropnode(gs_spcpath *p, int64_t i) {
 }
 
 )GSRT"
-R"GSRT(static void gs_spc_open(gs_spleaf *lf, int64_t s) {
+R"GSRT(static void gs_spc_open(const gs_spcpath *p, gs_spleaf *lf, int64_t s) {
     int64_t j;
-    if ((uint64_t)lf->n >= GS_SPAN_LEAF || (uint64_t)s > (uint64_t)lf->n) gs_spc_corrupt();
+    if ((uint64_t)lf->n >= GS_SPAN_LEAF || (uint64_t)s > (uint64_t)lf->n) gs_spc_corrupt(p);
     for (j = lf->n; j > s; j--) {
         lf->idx[j] = lf->idx[j - 1];
         lf->cnt[j] = lf->cnt[j - 1];
@@ -4887,9 +4901,9 @@ R"GSRT(static void gs_spc_open(gs_spleaf *lf, int64_t s) {
 }
 
 )GSRT"
-R"GSRT(static void gs_spc_close(gs_spleaf *lf, int64_t s) {
+R"GSRT(static void gs_spc_close(const gs_spcpath *p, gs_spleaf *lf, int64_t s) {
     int64_t j;
-    if ((uint64_t)s >= (uint64_t)lf->n) gs_spc_corrupt();
+    if ((uint64_t)s >= (uint64_t)lf->n) gs_spc_corrupt(p);
     lf->n--;
     for (j = s; j < lf->n; j++) {
         lf->idx[j] = lf->idx[j + 1];
@@ -4898,9 +4912,9 @@ R"GSRT(static void gs_spc_close(gs_spleaf *lf, int64_t s) {
 }
 
 )GSRT"
-R"GSRT(static void gs_spc_openin(gs_spinner *in, int64_t s) {
+R"GSRT(static void gs_spc_openin(const gs_spcpath *p, gs_spinner *in, int64_t s) {
     int64_t j;
-    if ((uint64_t)in->n >= GS_SPAN_FAN || (uint64_t)s > (uint64_t)in->n) gs_spc_corrupt();
+    if ((uint64_t)in->n >= GS_SPAN_FAN || (uint64_t)s > (uint64_t)in->n) gs_spc_corrupt(p);
     for (j = in->n; j > s; j--) {
         in->key[j] = in->key[j - 1];
         in->max[j] = in->max[j - 1];
@@ -4910,9 +4924,9 @@ R"GSRT(static void gs_spc_openin(gs_spinner *in, int64_t s) {
 }
 
 )GSRT"
-R"GSRT(static void gs_spc_closein(gs_spinner *in, int64_t s) {
+R"GSRT(static void gs_spc_closein(const gs_spcpath *p, gs_spinner *in, int64_t s) {
     int64_t j;
-    if (in->n > GS_SPAN_FAN || (uint64_t)s >= (uint64_t)in->n) gs_spc_corrupt();
+    if (in->n > GS_SPAN_FAN || (uint64_t)s >= (uint64_t)in->n) gs_spc_corrupt(p);
     in->n--;
     for (j = s; j < in->n; j++) {
         in->key[j] = in->key[j + 1];
@@ -4953,10 +4967,10 @@ R"GSRT(static int64_t gs_spc_find(gs_spcpath *p, int64_t idx) {
     int64_t l, i = GS_SPCHEAD(p)->root, k;
     gs_spleaf *lf;
     p->h = GS_SPCHEAD(p)->height;
-    if (GS_SPBADH(p->h)) gs_spc_corrupt();
+    if (GS_SPBADH(p->h)) gs_spc_corrupt(p);
     for (l = 0; l < p->h; l++) {
         gs_spinner *in;
-        if (GS_SPBADIN(p, i)) gs_spc_corrupt();
+        if (GS_SPBADIN(p, i)) gs_spc_corrupt(p);
         in = GS_SPINNER(p, i);
         for (k = 1; k < in->n && in->key[k] <= idx; k++) {}
         p->node[l] = i;
@@ -4964,7 +4978,7 @@ R"GSRT(static int64_t gs_spc_find(gs_spcpath *p, int64_t idx) {
         i = in->child[k - 1];
     }
     p->node[p->h] = i;
-    if (GS_SPBADLEAF(p, i)) gs_spc_corrupt();
+    if (GS_SPBADLEAF(p, i)) gs_spc_corrupt(p);
     lf = GS_SPLEAF(p, i);
     for (k = 0; k < lf->n && lf->idx[k] <= idx; k++) {}
     p->pos[p->h] = k - 1;
@@ -4996,7 +5010,7 @@ R"GSRT(static void gs_spc_addchild(gs_spcpath *p, int64_t l, int64_t k, int64_t 
             int64_t half = GS_SPAN_FAN / 2;
             gs_spinner *r;
             nn = gs_spc_newnode(p);
-            if (nn == p->node[l]) gs_spc_corrupt();
+            if (nn == p->node[l]) gs_spc_corrupt(p);
             r = GS_SPINNER(p, nn);
             r->n = in->n - half;
             memcpy(r->key, in->key + half, (size_t)r->n * 8);
@@ -5008,7 +5022,7 @@ R"GSRT(static void gs_spc_addchild(gs_spcpath *p, int64_t l, int64_t k, int64_t 
                 s = k - half;
             }
         }
-        gs_spc_openin(o, s);
+        gs_spc_openin(p, o, s);
         o->key[s] = key;
         o->max[s] = max;
         o->child[s] = child;
@@ -5036,7 +5050,7 @@ R"GSRT(static void gs_spc_insert(gs_spcpath *p, int64_t k, int64_t idx, int64_t 
         int64_t half = GS_SPAN_LEAF / 2;
         gs_spleaf *r;
         nn = gs_spc_newnode(p);
-        if (nn == p->node[p->h]) gs_spc_corrupt();
+        if (nn == p->node[p->h]) gs_spc_corrupt(p);
         r = GS_SPLEAF(p, nn);
         r->n = lf->n - half;
         memcpy(r->idx, lf->idx + half, (size_t)r->n * 8);
@@ -5047,7 +5061,7 @@ R"GSRT(static void gs_spc_insert(gs_spcpath *p, int64_t k, int64_t idx, int64_t 
             s = k - half;
         }
     }
-    gs_spc_open(o, s);
+    gs_spc_open(p, o, s);
     o->idx[s] = idx;
     o->cnt[s] = cnt;
     if (!nn) {
@@ -5064,7 +5078,7 @@ R"GSRT(static void gs_spc_insert(gs_spcpath *p, int64_t k, int64_t idx, int64_t 
 R"GSRT(static void gs_spc_delete(gs_spcpath *p, int64_t k) {
     gs_spleaf *lf = GS_SPLEAF(p, p->node[p->h]);
     int64_t c = lf->cnt[k], l;
-    gs_spc_close(lf, k);
+    gs_spc_close(p, lf, k);
     if (lf->n > 0 || p->h == 0) {
         gs_spc_fix(p, p->h, c, 0);
         return;
@@ -5073,18 +5087,18 @@ R"GSRT(static void gs_spc_delete(gs_spcpath *p, int64_t k) {
     for (l = p->h - 1;; l--) {
         gs_spinner *in = GS_SPINNER(p, p->node[l]);
         int64_t e = p->pos[l], m = in->max[e];
-        gs_spc_closein(in, e);
+        gs_spc_closein(p, in, e);
         if (in->n > 0) {
             gs_spc_fix(p, l, m, 0);
             break;
         }
         /* A root of one child, which the functions never leave. */
-        if (l == 0) gs_spc_corrupt();
+        if (l == 0) gs_spc_corrupt(p);
         gs_spc_dropnode(p, p->node[l]);
     }
     while (GS_SPCHEAD(p)->height > 0) {
         int64_t r = GS_SPCHEAD(p)->root;
-        if (GS_SPBADNUM(p, r)) gs_spc_corrupt();
+        if (GS_SPBADNUM(p, r)) gs_spc_corrupt(p);
         if (GS_SPINNER(p, r)->n != 1) break;
         GS_SPCHEAD(p)->root = GS_SPINNER(p, r)->child[0];
         GS_SPCHEAD(p)->height--;
@@ -5106,18 +5120,19 @@ R"GSRT(static void gs_spc_take(gs_spcpath *p, int64_t k, int64_t cnt) {
 }
 
 )GSRT"
-R"GSRT(GS_API int64_t gs_slice_pool_place(gs_rref nodes, void *tree, int64_t len, int64_t cnt) {
+R"GSRT(GS_API int64_t gs_slice_pool_place(gs_rref nodes, void *tree, int64_t len, int64_t cnt,
+                                   const gs_loc *at) {
     gs_spcpath p;
     int64_t l, i, k = 0, j, m, c, now, idx, before[GS_SPAN_DEPTH];
     gs_spleaf *lf = NULL;
     if (cnt == 0 || nodes.hdr->len == 0) return len;
-    GS_SPSTART(&p, tree, nodes);
+    GS_SPSTART(&p, tree, nodes, at);
     p.h = GS_SPCHEAD(&p)->height;
-    if (GS_SPBADH(p.h)) gs_spc_corrupt();
+    if (GS_SPBADH(p.h)) gs_spc_corrupt(&p);
     i = GS_SPCHEAD(&p)->root;
     for (l = 0; l < p.h; l++) {
         gs_spinner *in;
-        if (GS_SPBADIN(&p, i)) gs_spc_corrupt();
+        if (GS_SPBADIN(&p, i)) gs_spc_corrupt(&p);
         in = GS_SPINNER(&p, i);
         for (k = 0, m = 0; k < in->n && in->max[k] < cnt; k++)
             if (in->max[k] > m) m = in->max[k];
@@ -5128,7 +5143,7 @@ R"GSRT(GS_API int64_t gs_slice_pool_place(gs_rref nodes, void *tree, int64_t len
         i = in->child[k];
     }
     if (l == p.h) {
-        if (GS_SPBADLEAF(&p, i)) gs_spc_corrupt();
+        if (GS_SPBADLEAF(&p, i)) gs_spc_corrupt(&p);
         lf = GS_SPLEAF(&p, i);
         for (k = 0, m = 0; k < lf->n && lf->cnt[k] < cnt; k++)
             if (lf->cnt[k] > m) m = lf->cnt[k];
@@ -5137,14 +5152,14 @@ R"GSRT(GS_API int64_t gs_slice_pool_place(gs_rref nodes, void *tree, int64_t len
     if (l < p.h || k == lf->n) {
         for (l = 0, i = GS_SPCHEAD(&p)->root; l < p.h; l++) {
             gs_spinner *in;
-            if (GS_SPBADIN(&p, i)) gs_spc_corrupt();
+            if (GS_SPBADIN(&p, i)) gs_spc_corrupt(&p);
             in = GS_SPINNER(&p, i);
             p.node[l] = i;
             p.pos[l] = in->n - 1;
             i = in->child[in->n - 1];
         }
         p.node[p.h] = i;
-        if (GS_SPBADLEAF(&p, i)) gs_spc_corrupt();
+        if (GS_SPBADLEAF(&p, i)) gs_spc_corrupt(&p);
         lf = GS_SPLEAF(&p, i);
         k = lf->n - 1;
         if (k < 0 || GS_SPSUM(lf->idx[k], lf->cnt[k]) != len) return len;
@@ -5161,7 +5176,7 @@ R"GSRT(GS_API int64_t gs_slice_pool_place(gs_rref nodes, void *tree, int64_t len
         lf->cnt[k] = now = c - cnt;
         j = k + 1;
     } else if (lf->n > 1 || p.h == 0) {
-        gs_spc_close(lf, k);
+        gs_spc_close(&p, lf, k);
         now = 0;
         j = k;
     } else {
@@ -5215,12 +5230,13 @@ R"GSRT(static void gs_spc_near(gs_spcpath *p, gs_spcpath *q, int64_t idx, int64_
     q->base = p->base;
     q->n = p->n;
     q->top = p->top;
+    q->at = p->at;
     q->h = p->h;
     memcpy(q->node, p->node, (size_t)(l + 1) * 8);
     memcpy(q->pos, p->pos, (size_t)(l + 1) * 8);
     for (q->pos[l]++; l < q->h; l++) {
         int64_t c = GS_SPINNER(q, q->node[l])->child[q->pos[l]];
-        if (l + 1 < q->h ? GS_SPBADIN(q, c) : GS_SPBADLEAF(q, c)) gs_spc_corrupt();
+        if (l + 1 < q->h ? GS_SPBADIN(q, c) : GS_SPBADLEAF(q, c)) gs_spc_corrupt(q);
         q->node[l + 1] = c;
         q->pos[l + 1] = 0;
     }
@@ -5238,7 +5254,7 @@ R"GSRT(static void gs_spc_release(gs_spcpath *p, gs_spcnear *s, int64_t idx, int
     if (prev) {
         int64_t c = lf->cnt[k], m = GS_SPSUM(GS_SPSUM(c, cnt), next ? nl->cnt[nk] : 0);
         lf->cnt[k] = m;
-        if (next && nl == lf) gs_spc_close(lf, nk);
+        if (next && nl == lf) gs_spc_close(p, lf, nk);
         gs_spc_fix(p, p->h, c, m);
         if (next && nl != lf) gs_spc_delete(s->np, nk);
     } else if (next) {
@@ -5252,11 +5268,12 @@ R"GSRT(static void gs_spc_release(gs_spcpath *p, gs_spcnear *s, int64_t idx, int
 }
 
 )GSRT"
-R"GSRT(GS_API void gs_slice_pool_free(gs_rref nodes, void *tree, int64_t idx, int64_t cnt) {
+R"GSRT(GS_API void gs_slice_pool_free(gs_rref nodes, void *tree, int64_t idx, int64_t cnt,
+                               const gs_loc *at) {
     gs_spcpath p, q;
     gs_spcnear s;
     if (cnt <= 0) return;
-    GS_SPSTART(&p, tree, nodes);
+    GS_SPSTART(&p, tree, nodes, at);
     if (*p.n == 0) {
         /* Node 0 stays zero, the chain's end. */
         memset(p.base, 0, GS_SPAN_NODE);
@@ -5272,15 +5289,15 @@ R"GSRT(GS_API void gs_slice_pool_free(gs_rref nodes, void *tree, int64_t idx, in
 
 )GSRT"
 R"GSRT(GS_API int64_t gs_slice_pool_regrow(gs_rref nodes, void *tree, int64_t len, int64_t idx,
-                                    int64_t ol, int64_t cnt) {
+                                    int64_t ol, int64_t cnt, const gs_loc *at) {
     gs_spcpath p, q;
     gs_spcnear s;
     int64_t end = idx + ol;
     if (nodes.hdr->len == 0) {
-        gs_slice_pool_free(nodes, tree, idx, ol);
-        return gs_slice_pool_place(nodes, tree, len, cnt);
+        gs_slice_pool_free(nodes, tree, idx, ol, at);
+        return gs_slice_pool_place(nodes, tree, len, cnt, at);
     }
-    GS_SPSTART(&p, tree, nodes);
+    GS_SPSTART(&p, tree, nodes, at);
     gs_spc_near(&p, &q, idx, end, &s);
     if (s.nl && s.nl->idx[s.nk] == end &&
         (s.nl->cnt[s.nk] >= cnt - ol || GS_SPSUM(end, s.nl->cnt[s.nk]) == len)) {
@@ -5288,7 +5305,7 @@ R"GSRT(GS_API int64_t gs_slice_pool_regrow(gs_rref nodes, void *tree, int64_t le
         return idx;
     }
     gs_spc_release(&p, &s, idx, ol);
-    return gs_slice_pool_place(nodes, tree, len, cnt);
+    return gs_slice_pool_place(nodes, tree, len, cnt, at);
 }
 )GSRT"
     ) },

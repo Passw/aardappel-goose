@@ -232,8 +232,11 @@ GS_API uint8_t gs_trim_memory(void);
 /* std's slice_pool (stdlib/slice_pool_internal.goose) keeps its freelist in
    a checked copy of the runtime's span tree (runtime_os.h): `nodes` is a
    node[>..] of GS_SPAN_NODE-byte nodes, and `tree` its header, a field
-   beside it. */
-GS_API int64_t gs_slice_pool_place(gs_rref nodes, void *tree, int64_t len, int64_t cnt);
-GS_API void gs_slice_pool_free(gs_rref nodes, void *tree, int64_t idx, int64_t cnt);
+   beside it. A corrupt tree is reported at `at`, where the program called
+   slice_pool (SFunction::takesloc). */
+GS_API int64_t gs_slice_pool_place(gs_rref nodes, void *tree, int64_t len, int64_t cnt,
+                                   const gs_loc *at);
+GS_API void gs_slice_pool_free(gs_rref nodes, void *tree, int64_t idx, int64_t cnt,
+                               const gs_loc *at);
 GS_API int64_t gs_slice_pool_regrow(gs_rref nodes, void *tree, int64_t len, int64_t idx,
-                                    int64_t ol, int64_t cnt);
+                                    int64_t ol, int64_t cnt, const gs_loc *at);

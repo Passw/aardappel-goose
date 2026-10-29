@@ -308,18 +308,19 @@ inline vector<string> CodeGen::EmitBuiltin(Call *c, Dst d0) {
         }
         case B_CHECK_LENGTH: {
             auto lv = RecvLoc(an[0]);
-            return { SliceLen(an[1], ArrayView(lv).elem, ln, "GS_E_ARRAYLEN") };
+            return { SliceLen(an[1], ArrayView(lv).elem, ln, "GS_E_ARRAYLEN",
+                              an.size() > 2 ? an[2] : nullptr) };
         }
         case B_RANGE_INDEX: {
             auto lv = RecvLoc(an[0]);
             auto v = ArrayView(lv);
             auto sv = GenPure(an[1]);
             auto esz = FixedSize(v.elem);
+            auto fail = FailCall("GS_E_ARRAYSLICE", an.size() > 2 ? an[2] : nullptr, ln);
             auto i = T();
             L("int64_t ", i, " = 0;");
             if (!esz) {
-                L("if ((uint64_t)", sv, ".len > (uint64_t)(", v.len,
-                  ")) gs_abort(GS_E_ARRAYSLICE, ", LocArgs(ln), ");");
+                L("if ((uint64_t)", sv, ".len > (uint64_t)(", v.len, ")) ", fail, ";");
             } else if (!c->poolcheck) {
                 L("if (", sv, ".len) ", i, " = ((uint8_t *)", sv,
                   ".data - (uint8_t *)(", v.elems, ")) / ", esz, ";");
@@ -331,8 +332,7 @@ inline vector<string> CodeGen::EmitBuiltin(Call *c, Dst d0) {
                   ".data - (uintptr_t)(", v.elems, "));");
                 L("if (", off, " % ", esz, " || ", off, " / ", esz,
                   " >= (uint64_t)(", v.len, ") || (uint64_t)", sv,
-                  ".len > (uint64_t)(", v.len, ") - ", off, " / ", esz,
-                  ") gs_abort(GS_E_ARRAYSLICE, ", LocArgs(ln), ");");
+                  ".len > (uint64_t)(", v.len, ") - ", off, " / ", esz, ") ", fail, ";");
                 L(i, " = (int64_t)(", off, " / ", esz, ");");
                 ind--;
                 L("}");
@@ -939,16 +939,25 @@ inline string CodeGen::SpanArgs(const Loc &lv) {
 
 // A slice pool's length argument, evaluated once. A negative length, or one
 // no data stack could hold, aborts before anything changes.
-inline string CodeGen::SliceLen(Node *n, TypeExpr *elem, Line ln, const char *error) {
+inline string CodeGen::SliceLen(Node *n, TypeExpr *elem, Line ln, const char *error,
+                                Node *msg) {
     auto nv = T();
     L("int64_t ", nv, " = (int64_t)(", GenX(n), ");");
     auto esz = FixedSize(elem);
     if (esz)
-        L("if ((uint64_t)", nv, " > GS_STACK_RESERVE / ", esz, ") gs_abort(", error, ", ",
-          LocArgs(ln), ");");
+        L("if ((uint64_t)", nv, " > GS_STACK_RESERVE / ", esz, ") ", FailCall(error, msg, ln), ";");
     else
-        L("if (", nv, " < 0) gs_abort(", error, ", ", LocArgs(ln), ");");
+        L("if (", nv, " < 0) ", FailCall(error, msg, ln), ";");
     return nv;
+}
+
+// The call a failed check makes: the runtime's message for `error`, or the
+// string literal a range_index or check_length was given in its place.
+inline string CodeGen::FailCall(const char *error, Node *msg, Line ln) {
+    if (auto s = msg ? Is<StrLit>(msg) : nullptr)
+        return cat("gs_abort_msg((const uint8_t *)", CStr(s->val), ", ", s->val.size(), ", ",
+                   LocArgs(ln), ")");
+    return cat("gs_abort(", error, ", ", LocArgs(ln), ")");
 }
 
 // Grows a slice pool's element region to `end` elements where it is shorter.
@@ -1245,6 +1254,8 @@ inline void CodeGen::EmitThreadThunk(FnSpec *sp, int64_t stacks) {
     }
     assert(ki.freevars.empty() && !ki.hasrf && sp->rets.empty());
     if (ki.needssp) args.push_back("0");
+    // A worker has no caller: its function's failures report its declaration.
+    if (ki.located) args.push_back(CallerLoc(sp->sf->line));
     Append(b, "    gs_gl = calloc(1, sizeof(gs_globals_t));\n"
               "    if (!gs_gl) gs_panic(\"out of memory copying globals\");\n");
     for (auto d : ThreadGlobals(sp)) {

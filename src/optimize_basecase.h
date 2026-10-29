@@ -280,6 +280,7 @@ struct BaseCaseInliner {
             K->rets[0]->kind == TY_ARRAY)
             return nullptr;
         Inliner inl { o, ast, K, o.curspec, {}, {} };
+        inl.AtCallSite(c);
         vector<Node *> decls;
         for (size_t i = 0; i < K->params.size(); i++) {
             auto pv = K->params[i];

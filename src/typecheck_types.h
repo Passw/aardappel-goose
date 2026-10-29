@@ -1696,6 +1696,19 @@ inline bool TypeCheck::RootedAtReceiver(const Val &rv, const Val &av, TypeExpr *
     return OneArrayOf(recvroot, elem);
 }
 
+// Where a standard library body is checked for the program's call, the
+// argument that call passes for the parameter whose class root is `root`:
+// what a diagnostic relocated to the call (LibraryCallLocation) names
+// instead of the library's parameter. "" for any other root.
+inline string TypeCheck::LibraryParamArg(VarDef *root) {
+    auto &f = CurRealFrame();
+    if (!root || !f.spec || !f.call || !ast.StdlibFile(f.sf->line.fileidx)) return "";
+    auto an = f.call->ValueArgNodes();
+    for (size_t p = 0; p < f.spec->params.size() && p < an.size(); p++)
+        if (f.spec->params[p]->ref.Root() == root) return ExprStr(an[p]);
+    return "";
+}
+
 // The same, required of what member `op` is handed.
 inline void TypeCheck::CheckRootedAtReceiver(Call *c, const char *op, const Val &rv,
                                              const Val &av, TypeExpr *elem, const char *what,
@@ -1707,8 +1720,13 @@ inline void TypeCheck::CheckRootedAtReceiver(Call *c, const char *op, const Val 
     // Rooted where the receiver is, but in storage that may hold the element
     // elsewhere too: a root says which variable, not which part of it.
     auto shared = av.Exact() && rv.Exact() && av.Root() && av.Root() == rv.Root();
+    // A library function's parameter has no root of its own: its body is
+    // checked once for every caller's argument.
+    auto arg = av.Exact() ? LibraryParamArg(av.Root()) : string();
     Error(c, cat(".", op, " needs ", what, " rooted at the array itself (", sec, "); ",
                  !why.empty() ? why
+                 : !arg.empty() ? cat("this one is ", arg, ", which ", CurRealFrame().sf->name,
+                                      " takes as a parameter, from any root")
                  : !av.Exact() ? cat("this one's root is not known exactly, only that it "
                                      "outlives ", root)
                  : shared ? cat("this one is rooted at ", av.Root()->type ? "" : "the caller's "

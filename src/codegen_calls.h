@@ -90,7 +90,8 @@ inline void CodeGen::EmitCallInto(Call *c, vector<Dst> &dsts) {
 
 // A call to an extern fn (§7.10): the C function directly, or through the
 // pointer the runtime bound from its shared library, each argument in its
-// C type, no calling-convention extras; a fixed result lands in a
+// C type, no calling-convention extras but the location a runtime entry
+// point may take (SFunction::takesloc); a fixed result lands in a
 // temporary like any other C value.
 inline vector<string> CodeGen::EmitExternCall(Call *c, FnSpec *sp) {
     if (std::find(usedexterns.begin(), usedexterns.end(), sp) == usedexterns.end())
@@ -113,6 +114,7 @@ inline vector<string> CodeGen::EmitExternCall(Call *c, FnSpec *sp) {
         argstr += Snapshot(pt, x);
         if (HoldsFatRef(pt)) grows = true;
     }
+    if (sp->sf->takesloc) Append(argstr, an.empty() ? "" : ", ", CallerLoc(c->line));
     if (grows) MarkFlush();
     vector<string> rets;
     if (sp->rets.empty()) {
@@ -360,6 +362,7 @@ inline vector<string> CodeGen::EmitSpecCall(Call *c, FnSpec *sp, Dst d0, vector<
         NoteStackCall(sp, c->line);
         args.push_back(SpTop());
     }
+    if (ki.located) args.push_back(CallerLoc(c->line));
     string argstr;
     for (size_t i = 0; i < args.size(); i++) Append(argstr, i ? ", " : "", args[i]);
     auto callee = ername.empty() ? ki.cname : ername;
@@ -740,6 +743,7 @@ inline vector<string> CodeGen::EmitDispatch(Call *c, Dst d0, vector<Dst> *alldst
             NoteStackCall(sp, c->line);
             args.push_back(SpTop());
         }
+        if (ki.located) args.push_back(CallerLoc(c->line));
         string argstr;
         for (size_t i = 0; i < args.size(); i++) Append(argstr, i ? ", " : "", args[i]);
         auto reach = SyncReach(sp, args, an);

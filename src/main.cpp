@@ -611,13 +611,23 @@ void GenRuntimeHeader(const char *exe) {
         if (src.find(")GSRT\"") != string::npos)
             throw CompileError { cat(rf, " contains the raw-string delimiter )GSRT\"") };
         Append(out, "    { \"", rf, "\", string_view(\n");
-        // Chunked adjacent raw strings: MSVC caps single literals at ~16K.
+        // Blank-line boundaries keep chunks stable when earlier text changes.
+        // Older MSVC caps single literals at ~16K, so long paragraphs also split.
         size_t pos = 0;
         while (pos < src.size()) {
             auto end = std::min(pos + 8000, src.size());
-            if (end < src.size()) {
-                auto nl = src.rfind('\n', end);
-                if (nl != string::npos && nl > pos) end = nl + 1;
+            for (auto line = pos; line < end;) {
+                auto nl = src.find('\n', line);
+                if (nl == string::npos || nl >= end) break;
+                if (src.find_first_not_of(" \t\r", line) >= nl) {
+                    end = nl + 1;
+                    break;
+                }
+                line = nl + 1;
+            }
+            if (end < src.size() && src[end - 1] != '\n') {
+                auto nl = src.rfind('\n', end - 1);
+                if (nl != string::npos && nl >= pos) end = nl + 1;
             }
             Append(out, "R\"GSRT(", string_view(src).substr(pos, end - pos), ")GSRT\"\n");
             pos = end;

@@ -100,15 +100,15 @@ inline vector<string> CodeGen::EmitBuiltin(Call *c, Dst d0) {
         }
         case B_MOVE_FROM: {
             auto dst = ArrayView(RecvLoc(an[0]));
-            auto data = T(), count = T();
-            L("uint8_t *", data, " = (uint8_t *)(", dst.elems, ");");
+            auto base = T(), count = T();
+            L("uint8_t *", base, " = (uint8_t *)(", dst.elems, ");");
             L("int64_t ", count, " = ", dst.len, ";");
             auto src = GenPure(an[1]);
             L("if (", count, " != ", src,
               ".len) gs_abort_msg((const uint8_t *)\"move_from lengths differ\", "
               "sizeof(\"move_from lengths differ\") - 1, ", LocArgs(ln), ");");
             auto size = FixedSize(dst.elem);
-            if (size) L("if (", count, ") memmove(", data, ", ", src, ".data, (size_t)", count, " * ", size, ");");
+            if (size) L("if (", count, ") memmove(", base, ", ", src, ".data, (size_t)", count, " * ", size, ");");
             return {};
         }
         case B_TO_BYTES: return EmitToBytes(an, d0, ln);

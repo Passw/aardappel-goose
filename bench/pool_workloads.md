@@ -79,14 +79,56 @@ built by that compiler; the library side is the mechanical migration.
 | Etc::CacheSimulation | process cycles, millions | 4661 | 5142 | 1.103 |
 
 The gap is +10.1%, down from +27.4%, and the source stays on the builtin. The
-slice microbenchmarks are at parity under Clang, so what is left is in how
-CacheSimulation calls the pool (short strings, the pool passed down through
-`put` and `remove_oldest`); it has not been profiled yet. The samples are in
-the raw results below, under `runtime_span_tree`:
+samples are in the raw results below, under `runtime_span_tree`:
 
 ```text
 python bench/pool_workloads.py --exe build/Release/goose.exe --arena C:/W/LangArena --kostya C:/W/kostya-benchmarks --out build/pool-apps-spans --construct-timer --only Etc::CacheSimulation --copies 3 --reps 3 --warmups 1 --cpus 28
 ```
+
+### Where the gap is
+
+Profiled 2026-10-28 from that run's generated C. Both sides do the same tree
+work: counters added to the C give 9,082,800 placements and 9,077,910 frees on
+each, with the same descent and scan trip counts and the same freed indices.
+A sampling profile of both sides (the main thread's address every 250 µs,
+Clang 22 at the flags above plus DWARF line tables) and timed edits of the
+library side's C locate the gap:
+
+| Library side's C | Ratio to builtin |
+|---|---:|
+| as generated | 1.101 |
+| `new_string` forced inline | 1.027 |
+| tree copy's checks removed | 1.102 |
+| both | 1.034 |
+
+Median timed seconds over three copies of each, three interleaved runs per
+copy, CPU 28.
+
+Most of the gap is one inlining decision. Clang inlines the builtin side's
+`new_string` into `put`, at an inline cost of 185 against its threshold of
+225, but not the library side's, which costs 370. The `alloc_slice` inlined
+into it brings seven abort calls (two length checks, the span check, two slice
+checks, growth and `copy_into`'s length assert), where the builtin's
+allocation brings two. Clang charges each call about 24: replaced by traps,
+the seven cost 205. Marking the abort functions cold changes nothing, and
+sharing one abort call per function still costs 280. Out of line, each of
+the five calls passes eight arguments, four of them on the stack under the
+Windows ABI, and saves eight registers. Built with Clang 20 in WSL, where
+`new_string` stays out of line as well but calls are cheaper, the library
+side runs 9.2% more instructions but only 4.5% more cycles.
+
+The tree copy's checks cost nothing measurable here. With `new_string`
+inlined, about half of the remaining 2.7% is the tree copy's placement and
+release, and the rest is spread over `put`'s inlined code.
+
+The library's Goose code offers no cheap way under the threshold: dropping the
+second length check saves 10 but loses the bulk zeroing of the appended
+elements, and zeroing the reused elements by index instead of through a slice
+raises the cost to 465. What would close it is in the compiler: bounds-check
+elimination that carries the span check into `defaults`' slice, cheaper abort
+sites, or letting the C compiler inline a small function whose size is an
+inlined `inline fn`. The library side also gets two specializations of
+`new_string` with identical C, which only costs size.
 
 ## Compiler and allocator costs
 

@@ -608,10 +608,14 @@ A nested array whose element type is recursive keeps its byte size beside
 its count: `{ count: u32, bytes: u32 }` in front of the children. The
 producer knows the size at the one moment the container completes, as the
 top minus the start, and writes it once; every reader thereafter steps
-over the container in one read. Stepping over any `Json` element is then
-O(1): `Null`, `Bool` and `Num` are fixed, `Str` reads its varint, `Arr`
-and `Obj` read `bytes`. The size walker keeps its shape; its array case
-reads a word instead of looping.
+over the container by reading that word. Stepping over a `Json` element
+is then a constant number of reads and no recursion: the tag, and then by
+variant nothing (`Null`, `Bool` and `Num` are fixed), the varint length
+(`Str`), or `bytes` (`Arr` and `Obj`); a `Member` adds its key's varint
+length in front. It is not literally one read, since the tag has to say
+which variant the element is before its size can be read, but the switch
+is small and, in JSON, mostly predictable. The size walker keeps its shape;
+its array case reads a word instead of looping.
 
 What follows from it:
 
@@ -621,8 +625,8 @@ What follows from it:
   was clearly ahead of a tape.
 * `copy`, `bytes_of` and `to_bytes` of a subtree are a memcpy or a view of
   known length. A finished tape is a FlatBuffers-like format: a reader can
-  skip a megabyte of array with one read, and a document can be sliced into
-  subdocuments without parsing them.
+  skip a megabyte of array with a tag and a size read, and a document can
+  be sliced into subdocuments without parsing them.
 * The verifier that `from_bytes` runs checks each stored size against the
   walk, once, so an image cannot lie about where a container ends.
 * The cost is four bytes per container, paid only by arrays of recursive
@@ -636,6 +640,43 @@ count packed into the same word). Dropping `count` saves four bytes per
 container at the price of `.len` becoming O(children) for these arrays,
 when it is O(1) for every other array in the language. Keep both unless
 measurements of a real tape say otherwise.
+
+**Where the word goes, and where not.** Three placements are possible, and
+they differ in what a skip costs and what the data costs:
+
+* *Per element*: every `Json..` element length-prefixed. A skip is one
+  read and no branch, at four bytes for every `Null` and `Num` as well.
+  Too much for what it buys: the tag dispatch it saves is a small switch,
+  and JSON arrays are mostly homogeneous.
+* *Per nested array of a recursive element type*, the proposal: four bytes
+  per `Arr` or `Obj`, nothing on leaves, and a skip is the tag plus one or
+  two reads.
+* *Per nested array of any non-fixed element type*: the same word on every
+  `u8[][]` or `Shape..[]` field too, so that reaching a field behind one,
+  or skipping an element that holds one, is O(1) instead of O(count).
+
+The third is the question of whether the array in an enum payload and the
+array at the tail of a struct should keep different representations. They
+are less different than they look. A `[>..]` at the root, or at the tail of
+a local or global struct, keeps its count in the owning frame (Appendix
+C.2) and its size is the top minus its base, so it never needs the word,
+whichever placement is chosen; the question only concerns the at-rest `[]`
+form of an array inside an element or a field. The reason to keep the word
+to recursive element types is that it removes an unbounded cost there and
+a bounded one elsewhere: re-walking a non-recursive nested array costs a
+factor of at most the type's static nesting depth, which is one or two in
+every type in the repository, while for a recursive type the factor is the
+data's depth. The repository holds no stdlib, benchmark or sample value
+with a nested array of non-fixed elements at all (its sequential data is
+strings and variable-mode ADTs whose payloads are fixed fields, strings and
+references, all skipped in O(1)); `u8[][]` fields occur in five tests. So
+there is no measured case today where the bounded cost shows. Uniformity
+would remove one case from the walker and the verifier, make every nested
+array O(1) to skip and to view with `bytes_of`, and give serialized images
+one shape, for four bytes per such array: per array of non-fixed elements,
+not per element, and not on strings, whose elements are fixed. Since the
+choice is a flip of the one predicate the walker consults, it can wait for
+a measurement; the note proposes the recursive-only form until then.
 
 ### 5.4 What each variant must do to keep the size right
 
@@ -706,7 +747,7 @@ fn total(j: Json.Bool&) -> f64 { 0.0 }
 fn total(j: Json.Str&) -> f64 { 0.0 }
 recursive fn total(j: Json.Arr&) -> f64 {
     var t = 0.0;
-    for &c in j.children { t += total(c); }      // steps over c in one read
+    for &c in j.children { t += total(c); }      // steps over c by its tag and size
     return t;
 }
 recursive fn total(j: Json.Obj&) -> f64 {
@@ -716,7 +757,7 @@ recursive fn total(j: Json.Obj&) -> f64 {
 }
 
 fn member(j: Json.Obj&, key: u8[:]) -> Json..? {
-    for &m in j.members { if m.key == key { return m.val; } }   // skips each val in one read
+    for &m in j.members { if m.key == key { return m.val; } }   // skips each val unwalked
     return null;
 }
 ```

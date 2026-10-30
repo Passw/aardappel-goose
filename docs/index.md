@@ -80,8 +80,9 @@ and the reference describe what was built; these say why.
   exit paths and `return … from`; a proposal.
 * [Nested growth](design/nested_growth.md): building a recursive tree
   (a JSON tape) in place on one stack by growing a container on the open
-  path; the type relaxations, append handles with a checked push, and the
-  static proofs that elide the check, compared.
+  path; the type relaxations, append handles with a checked push, the
+  static proofs that elide the check, and how the result is stepped
+  through without re-walking subtrees, compared.
 * [Standard library design](design/stdlib_design.md): the library's
   original scope and conventions.
 * [Compiler analyses](design/analysis_inventory.md): an inventory of the
